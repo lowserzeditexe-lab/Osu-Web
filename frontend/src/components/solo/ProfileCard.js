@@ -97,20 +97,23 @@ export default function ProfileCard({ accent = "#b388ff", beatmap, selectedDiff,
         {/* ── Header: always visible ── */}
         <div className="flex items-center gap-4 px-5 pt-5 pb-3">
           <div className="relative flex-shrink-0 h-[72px] w-[72px]">
-            {/* Progression ring — viewBox matches display size so inset perfectly aligns
-                with the inner edge of the ring track. r=30 stroke=3.5 → ring inner edge
-                at radius ≈28.25 → avatar at inset 8px sits flush inside the ring. */}
-            <svg width="72" height="72" viewBox="0 0 72 72" className="block absolute inset-0">
-              <circle cx="36" cy="36" r="30" fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="3.5" />
+            {/* Progression ring — the SVG is intentionally bigger than the
+                72×72 avatar slot so the accent ring's drop-shadow halo can
+                bleed outside the visual area without being clipped.
+                viewBox 0 0 96 96, ring centered at 48,48 r=30 → same visual
+                ring size as before, but with 12 px of extra room on every
+                side for the glow. */}
+            <svg width="96" height="96" viewBox="0 0 96 96" className="block absolute -inset-3 overflow-visible pointer-events-none">
+              <circle cx="48" cy="48" r="30" fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="3.5" />
               <circle
-                cx="36" cy="36" r="30"
+                cx="48" cy="48" r="30"
                 fill="none"
                 stroke={accent}
                 strokeWidth="3.5"
                 strokeDasharray={circ}
                 strokeDashoffset={circ * (1 - player.levelProgress)}
                 strokeLinecap="round"
-                transform="rotate(-90 36 36)"
+                transform="rotate(-90 48 48)"
                 style={{ filter: `drop-shadow(0 0 7px ${accent}99)` }}
               />
             </svg>
