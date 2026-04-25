@@ -273,7 +273,7 @@ export default function SongList({
       <div
         ref={scrollRef}
         data-lenis-prevent
-        className="flex-1 overflow-y-auto overflow-x-hidden py-2 pl-16 pr-12 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10"
+        className="flex-1 overflow-y-auto overflow-x-hidden py-2 pl-24 pr-16 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10"
         style={{ perspective: "900px", overscrollBehavior: "contain" }}
       >
         <div>
