@@ -182,10 +182,23 @@ define([], function () {
 
     // return value true: success
     this.pause = function pause() {
-      if (!self.playing || self._getPosition() <= 0) return false;
-      self.position +=
-        (self.audio.currentTime - self.started) * self.playbackRate;
-      self.source.stop();
+      // Don't try to pause something that isn't playing.
+      if (!self.playing) return false;
+      // Even if we haven't reached t=0 yet (we're still in the wait /
+      // count-in window scheduled by play(...wait)), the source node is
+      // ALREADY scheduled to start at a future timestamp via
+      // `source.start(audio.currentTime + wait/...)`. If we don't stop()
+      // it now, the song will silently start playing right after the
+      // user has paused or quit — which is exactly the bug the user
+      // hit when pressing Esc during the intro.
+      try { self.source.stop(); } catch (_) {}
+      // Only advance the saved position if we actually consumed audible
+      // playback (position > 0). During the count-in the elapsed time
+      // is "negative" relative to song start, so don't pollute it.
+      if (self._getPosition() > 0) {
+        self.position +=
+          (self.audio.currentTime - self.started) * self.playbackRate;
+      }
       self.playing = false;
       return true;
     };
