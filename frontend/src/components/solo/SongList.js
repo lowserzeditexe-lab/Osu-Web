@@ -190,11 +190,10 @@ export default function SongList({
       {/* Toute la colonne (header + cards + profile) : même largeur, alignée à droite du panneau */}
       <div className="ml-auto w-[440px] xl:w-[500px] 2xl:w-[560px] flex flex-col h-full">
 
-      {/* ── Header — aligné horizontalement avec les cards en dessous (qui ont
-          pl-16 sur leur conteneur). Ici on remet le header au même padding
-          gauche pour que la search bar et le grouping commencent à la même
-          x-position que la vignette de chaque diff card. */}
-      <div className="flex-shrink-0 -ml-[400px] w-[calc(100%+400px)] pl-8 pr-12 pt-5 pb-3 space-y-2">
+      {/* ── Header — la search bar et le grouping ont la MÊME largeur que la
+          ProfileCard (ml-6 / mr-12), pour un alignement vertical net entre le
+          haut et le bas de la colonne. */}
+      <div className="flex-shrink-0 mx-6 mr-12 pt-5 pb-3 space-y-2">
 
         {/* Search */}
         <div
