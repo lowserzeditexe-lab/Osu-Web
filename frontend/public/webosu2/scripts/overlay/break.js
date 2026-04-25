@@ -39,23 +39,16 @@ define([], function () {
             this.addChild(this.barleft);
             this.addChild(this.barright);
 
-            // Halo BEHIND the actual digit — same trick we use elsewhere
-            // (and on the avatar): a blurred copy with extra filter padding so
-            // the glow can extend well outside the sprite frame without being
-            // clipped by the texture cell.
-            this.numberHalo = new PIXI.BitmapText("", { fontName: 'Venera', fontSize: 40, tint: 0xffffff });
-            this.numberHalo.anchor.set(0.5);
-            this.numberHalo.x = 0;
-            this.numberHalo.y = -40;
-            const numBlur = new PIXI.filters.BlurFilter(10, 6);
-            numBlur.padding = 40;
-            this.numberHalo.filters = [numBlur];
-            this.addChild(this.numberHalo);
-
-            this.number = new PIXI.BitmapText("", { fontName: 'Venera', fontSize: 40 });
+            // Countdown digit — fontSize 40 → 56, with extra style.padding so
+            // the glyph's anti-aliased edges have room inside the texture cell
+            // and aren't clipped by the sprite frame (same intent as enlarging
+            // the SVG behind the avatar so its glow can bleed out).
+            this.number = new PIXI.BitmapText("", { fontName: 'Venera', fontSize: 56 });
             this.number.anchor.set(0.5);
             this.number.x = 0;
-            this.number.y = -40;
+            this.number.y = -56;
+            if (this.number.style) this.number.style.padding = 16;
+            this.number.padding = 16;
             this.addChild(this.number);
 
             this.resize(windowfield);
@@ -83,7 +76,6 @@ define([], function () {
             this.barleft.x = -radius;
             this.barright.x = radius;
             this.number.text = Math.ceil(t / 1000).toString();
-            this.numberHalo.text = this.number.text;
             this.alpha = Math.max(0, Math.min(1, Math.min(t, time - this.starttime - 500) / this.fadetime));
         }
 

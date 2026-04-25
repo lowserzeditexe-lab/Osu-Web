@@ -16,26 +16,18 @@ define([], function () {
             this.field = windowfield;
 
             // ── Combo, bottom-left (replaces the elapsed-time readout) ──
-            // fontSize 44 (was 28) — bigger, more readable, more in line with the
-            // visual weight of the score/accuracy in the top-right corner.
-            //
-            // We render the number TWICE:
-            //   1. a blurred clone behind  → soft white halo / glow.
-            //   2. the crisp original on top.
-            // The halo's filter has generous `padding` so its outer fringe is
-            // NEVER clipped by the sprite frame (exact same idea as enlarging
-            // the SVG behind the avatar so its drop-shadow can bleed out).
-            this.comboHalo = new PIXI.BitmapText("0x", { fontName: 'Venera', fontSize: 44, tint: 0xffffff });
-            this.comboHalo.anchor.set(0, 1);
-            this.comboHalo.alpha = 0;
-            const comboBlur = new PIXI.filters.BlurFilter(10, 6);
-            comboBlur.padding = 40; // ← extra room so the blur isn't cropped
-            this.comboHalo.filters = [comboBlur];
-            this.addChild(this.comboHalo);
-
-            this.combo = new PIXI.BitmapText("0x", { fontName: 'Venera', fontSize: 44, tint: 0xddffff });
+            // fontSize 44 → 56 + extra margin from the screen edge so the
+            // digit's anti-aliased edges (the "halo") never sit flush against
+            // the sprite frame / window border. Same intent as enlarging the
+            // SVG behind the avatar so its glow can breathe.
+            this.combo = new PIXI.BitmapText("0x", { fontName: 'Venera', fontSize: 56, tint: 0xddffff });
             this.combo.anchor.set(0, 1);
             this.combo.alpha = 0;       // start hidden — only fade in once a hit lands
+            // padding on the BitmapText style adds transparent space around
+            // each glyph in the underlying texture, so anti-aliased edges
+            // are never clipped by the sprite frame.
+            if (this.combo.style) this.combo.style.padding = 16;
+            this.combo.padding = 16;
             this.addChild(this.combo);
 
             // ── Pie-chart progress, top-right (sits next to the accuracy %) ──
@@ -50,13 +42,12 @@ define([], function () {
         resize(windowfield) {
             this.field = windowfield;
 
-            // Combo bottom-LEFT — scale margins with screen size so the text never
-            // hugs the edge on small or large viewports.
+            // Combo bottom-LEFT — generous margin (was 22 → 40) so the digit
+            // has room to breathe and its halo / AA edge isn't pinned to the
+            // window border.
             const unit = Math.min(windowfield.width / 640, windowfield.height / 480);
-            this.combo.x = 22 * unit;
-            this.combo.y = windowfield.height - 22 * unit;
-            this.comboHalo.x = this.combo.x;
-            this.comboHalo.y = this.combo.y;
+            this.combo.x = 40 * unit;
+            this.combo.y = windowfield.height - 40 * unit;
 
             // Fallback position (overridden each frame in update() once we
             // can read the live accuracy x/y from ScoreOverlay).
@@ -111,10 +102,8 @@ define([], function () {
             const wantsComboVisible = c >= 1;
             if (wantsComboVisible) {
                 this.combo.text = c + "x";
-                this.comboHalo.text = c + "x";
                 const boost = Math.min(1.25, 1 + Math.log10(Math.max(1, c)) * 0.10);
                 this.combo.scale.set(boost);
-                this.comboHalo.scale.set(boost);
                 this._comboTargetAlpha = 1;
             } else {
                 this._comboTargetAlpha = 0;
@@ -146,9 +135,6 @@ define([], function () {
 
             // The combo's per-element alpha is multiplicative with the hud fade.
             this.combo.alpha = this.combo._localAlpha;
-            // Halo follows the same alpha but a bit dimmer so it reads as a
-            // glow rather than a duplicate text.
-            this.comboHalo.alpha = this.combo._localAlpha * 0.85;
         }
 
         destroy(options) {
