@@ -41,6 +41,7 @@ window.beatmaplistLoadedCallback = function () {
 		                    }
 		                },
 		                // urlArgs: "bust=" +  (new Date()).getTime()
+                urlArgs: "v=" + (new Date()).getTime()
 		            });
 				}, {"data-main":"scripts/initgame"});
 				// load Liked list
