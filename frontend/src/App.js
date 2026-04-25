@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import Header from "@/components/Header";
@@ -15,6 +15,18 @@ import { useLenis } from "@/hooks/useLenis";
 import { AudioPlayerProvider, useAudioPlayer } from "@/contexts/AudioPlayerContext";
 import { SavedBeatmapsProvider } from "@/contexts/SavedBeatmapsContext";
 import { LibraryFiltersProvider } from "@/contexts/LibraryFiltersContext";
+import osuCursorPng from "@/assets/cursor.png";
+import osuCursorCur from "@/assets/cursor.cur";
+
+// Inject the osu! cursor into the global --osu-cursor CSS variable as soon
+// as the app boots, so the user sees the in-game cursor everywhere on the
+// site instead of the OS default cursor.
+function useOsuCursor() {
+  useEffect(() => {
+    const value = `url("${osuCursorPng}") 24 24, url("${osuCursorCur}") 24 24, default`;
+    document.documentElement.style.setProperty("--osu-cursor", value);
+  }, []);
+}
 
 function Shell() {
   const { currentBeatmap } = useAudioPlayer();
@@ -23,6 +35,7 @@ function Shell() {
   const isSolo = pathname === "/solo";
   const isPlay = pathname.startsWith("/play/");
   useLenis(!isSolo && !isPlay);
+  useOsuCursor();
 
   return (
     <div

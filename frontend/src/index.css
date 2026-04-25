@@ -2,6 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────────────────────────
+   osu! Play cursor — global cursor override.
+   The actual url() values are injected at runtime in App.js via
+   the --osu-cursor CSS variable so that webpack's css-loader
+   does not try to resolve the asset paths at build time.
+   Hot-spot is the center of the circle (24,24).
+   The Play page (webosu2 inside an iframe) is unaffected because
+   browsers don't apply parent-document cursor rules through the
+   iframe boundary.
+   ────────────────────────────────────────────────────────────── */
+:root {
+    --osu-cursor: default;
+}
+
+html,
+body,
+*,
+*::before,
+*::after {
+    cursor: var(--osu-cursor);
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+    cursor: var(--osu-cursor);
+}
+
 html,
 body {
     background: #000;
