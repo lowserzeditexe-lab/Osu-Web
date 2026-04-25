@@ -45,11 +45,12 @@ define([], function () {
         resize(windowfield) {
             this.field = windowfield;
 
-            // Combo bottom-LEFT — generous margin from the screen edge so the
-            // digit has REAL empty space around it (was 22 → 64).
+            // Combo bottom-LEFT — y back to its original close-to-edge
+            // position (22 unit margin), x kept at 64 unit for extra
+            // breathing room from the LEFT edge.
             const unit = Math.min(windowfield.width / 640, windowfield.height / 480);
             this.combo.x = 64 * unit;
-            this.combo.y = windowfield.height - 64 * unit;
+            this.combo.y = windowfield.height - 22 * unit;
 
             // Fallback position (overridden each frame in update() once we
             // can read the live accuracy x/y from ScoreOverlay).
