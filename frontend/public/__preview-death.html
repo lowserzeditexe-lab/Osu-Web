@@ -1,0 +1,52 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"/><title>death menu preview</title>
+<style>
+html,body{margin:0;height:100%;background:url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1920') center/cover no-repeat #000; font-family:Inter,system-ui;color:#fff}
+.pause-menu {
+  position: fixed; inset: 0; z-index: 9000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 56px; padding: 72px 32px;
+  background: rgba(0,0,0,0.66);
+  backdrop-filter: blur(14px);
+}
+.paused-title {
+  font-size: 96px; font-weight: 900; letter-spacing: -0.045em;
+  text-transform: lowercase; line-height: 1;
+  background: linear-gradient(135deg,#ff66aa 0%,#ff8ec7 45%,#b388ff 100%);
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+  filter: drop-shadow(0 0 24px rgba(255,102,170,0.55)) drop-shadow(0 0 56px rgba(179,136,255,0.35)) drop-shadow(0 6px 32px rgba(0,0,0,0.6));
+  animation: pause-glow 2.6s ease-in-out infinite;
+}
+@keyframes pause-glow {0%,100%{filter:drop-shadow(0 0 24px rgba(255,102,170,0.55)) drop-shadow(0 0 56px rgba(179,136,255,0.35)) drop-shadow(0 6px 32px rgba(0,0,0,0.6))}50%{filter:drop-shadow(0 0 36px rgba(255,102,170,0.85)) drop-shadow(0 0 84px rgba(179,136,255,0.55)) drop-shadow(0 6px 32px rgba(0,0,0,0.6))}}
+.pause-menu.is-dead .paused-title {
+  background: linear-gradient(135deg,#ff5d6c 0%,#ff8a9c 45%,#b3001f 100%);
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+  animation: dead-glow 2.6s ease-in-out infinite;
+}
+@keyframes dead-glow {0%,100%{filter:drop-shadow(0 0 24px rgba(255,60,90,0.55)) drop-shadow(0 0 56px rgba(179,0,30,0.35)) drop-shadow(0 6px 32px rgba(0,0,0,0.6))}50%{filter:drop-shadow(0 0 38px rgba(255,60,90,0.90)) drop-shadow(0 0 90px rgba(179,0,30,0.55)) drop-shadow(0 6px 32px rgba(0,0,0,0.6))}}
+.pause-menu.is-dead { background: radial-gradient(ellipse at 50% 25%, rgba(255,60,90,0.18) 0%, transparent 55%), rgba(0,0,0,0.74); }
+.button-list { display: flex; flex-direction: column; gap: 14px; min-width: 320px; max-width: 90vw; }
+.pausebutton { display:flex;align-items:center;justify-content:center;height:58px;padding:0 36px;border-radius:14px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.10);font-family:inherit;font-size:13px;font-weight:700;letter-spacing:0.32em;text-transform:uppercase;color:rgba(255,255,255,0.85);cursor:pointer;backdrop-filter:blur(6px) }
+.pausebutton.retry:hover { background:rgba(140,180,255,0.10);border-color:rgba(140,180,255,0.40);color:#b9d2ff }
+.pausebutton.quit:hover { background:rgba(255,90,120,0.10);border-color:rgba(255,90,120,0.40);color:#ff9aa8 }
+#sw{position:fixed;top:8px;left:8px;z-index:99999;display:flex;gap:6px}
+#sw a{padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);color:#fff;text-decoration:none}
+#sw a.a{background:#fff;color:#000}
+</style></head>
+<body>
+<div id="sw"><a href="?m=pause">paused</a><a href="?m=dead" class="a">dead</a></div>
+<div class="pause-menu" id="m">
+  <div class="paused-title" id="t">dead</div>
+  <div class="button-list">
+    <div class="pausebutton continue" id="cont">Continue</div>
+    <div class="pausebutton retry">Retry</div>
+    <div class="pausebutton quit">Quit</div>
+  </div>
+</div>
+<script>
+const mode=new URLSearchParams(location.search).get('m')||'dead';
+const menu=document.getElementById('m'),title=document.getElementById('t'),cont=document.getElementById('cont');
+if(mode==='dead'){menu.classList.add('is-dead');title.textContent='dead';cont.style.display='none';}
+else{title.textContent='paused';cont.style.display='';}
+document.querySelectorAll('#sw a').forEach(a=>a.classList.toggle('a',a.href.includes('m='+mode)));
+</script>
+</body></html>

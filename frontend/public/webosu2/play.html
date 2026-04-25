@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>WebOsu 2 — Play</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <!-- NOTE: we intentionally DON'T load picnic.min.css / main.css here to avoid
+       their global rules clashing with our overlay. The engine itself (PIXI
+       canvas) draws everything inside #game-area, so it doesn't need them. -->
+  <link rel="stylesheet" type="text/css" href="style/font.css" />
+  <link rel="icon" href="favicon.png" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #0a0a0c; color: #fff; overflow: hidden; height: 100%; width: 100%; }
+    body {
+      font-family: "Inter", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ── Loading overlay ────────────────────────────────────────── */
+    #play-overlay {
+      position: fixed; inset: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: center;
+      background: #0a0a0c;
+      transition: opacity 420ms ease;
+    }
+    #play-overlay.hidden { opacity: 0; pointer-events: none; }
+
+    /* Beatmap cover as backdrop (blurred + darkened). */
+    #play-overlay .backdrop {
+      position: absolute; inset: 0;
+      background-size: cover;
+      background-position: center;
+      filter: blur(22px) brightness(0.35);
+      transform: scale(1.08); /* hide blur edges */
+      transition: opacity 400ms ease;
+      opacity: 0;
+    }
+    #play-overlay .backdrop.ready { opacity: 1; }
+    #play-overlay .vignette {
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0) 0%, rgba(0,0,0,0.55) 100%);
+      pointer-events: none;
+    }
+
+    /* Minimal single-ring spinner. */
+    .spinner {
+      position: relative;
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      border: 3px solid rgba(255,255,255,0.12);
+      border-top-color: #fff;
+      animation: spin 0.9s cubic-bezier(0.5, 0.15, 0.5, 0.85) infinite;
+      z-index: 1;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Hidden status markers — kept so the engine's ready detection works. */
+    .engine-status-markers { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+
+    /* Error (only shown if the download truly fails). */
+    #play-error {
+      display: none;
+      position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+      color: #ff9aa8; font-size: 13px; text-align: center;
+      max-width: 420px; line-height: 1.5;
+      padding: 14px 20px; border-radius: 12px;
+      background: rgba(0, 0, 0, 0.65);
+      border: 1px solid rgba(255, 90, 120, 0.3);
+      backdrop-filter: blur(10px);
+      z-index: 2;
+    }
+
+    /* ── Floating quit button (over iframe) ─────────────────────── */
+    .quit-btn {
+      position: fixed; top: 16px; right: 16px; z-index: 9999;
+      background: rgba(0,0,0,0.55); color: #fff; border: 1px solid rgba(255,255,255,0.18);
+      backdrop-filter: blur(10px);
+      border-radius: 99px; padding: 8px 14px; font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.22em; cursor: pointer;
+      transition: all 150ms ease;
+    }
+    .quit-btn:hover { background: rgba(255,0,80,0.35); border-color: rgba(255,255,255,0.35); }
+
+    /* When the engine takes over, hide our overlay entirely. */
+    body.gaming #play-overlay { display: none !important; }
+
+    /* ── Skip-intro button (osu!-style) ─────────────────────────── */
+    #skip-btn {
+      position: fixed; right: 36px; bottom: 36px;
+      z-index: 8000;
+      display: none;
+      align-items: center; gap: 12px;
+      padding: 14px 22px 14px 18px;
+      border-radius: 14px;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.18);
+      color: #fff;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12px; font-weight: 700;
+      letter-spacing: 0.32em; text-transform: uppercase;
+      transition: transform 200ms cubic-bezier(0.22,1,0.36,1),
+                  background-color 180ms ease,
+                  border-color 180ms ease,
+                  box-shadow 240ms ease,
+                  opacity 280ms ease;
+      transform: translateY(8px);
+      opacity: 0;
+      user-select: none;
+      box-shadow: 0 12px 36px -14px rgba(0,0,0,0.6);
+    }
+    #skip-btn.show {
+      display: flex;
+      transform: translateY(0);
+      opacity: 1;
+      animation: skip-pulse 1.6s ease-in-out infinite;
+    }
+    #skip-btn:hover {
+      background: rgba(255,102,170,0.18);
+      border-color: rgba(255,102,170,0.50);
+      box-shadow: 0 12px 36px -10px rgba(255,102,170,0.55);
+    }
+    #skip-btn:active { transform: translateY(0) scale(0.97); }
+    #skip-btn .skip-arrows {
+      display: inline-flex; gap: 2px;
+    }
+    #skip-btn .skip-arrows span {
+      width: 0; height: 0;
+      border-top: 7px solid transparent;
+      border-bottom: 7px solid transparent;
+      border-left: 9px solid rgba(255,255,255,0.85);
+    }
+    #skip-btn .skip-arrows span:nth-child(2) { opacity: 0.6; }
+    #skip-btn .skip-arrows span:nth-child(3) { opacity: 0.3; }
+    @keyframes skip-pulse {
+      0%, 100% { box-shadow: 0 12px 36px -14px rgba(0,0,0,0.6); }
+      50%      { box-shadow: 0 12px 36px -8px rgba(255,102,170,0.45), 0 0 0 1px rgba(255,102,170,0.18) inset; }
+    }
+
+    /* Make sure the game canvas fills the viewport */
+    #game-area { position: fixed; inset: 0; background: #000; }
+    #game-area canvas { display: block; width: 100%; height: 100%; }
+
+    /* ── Pause menu (osu!-style) ────────────────────────────────── */
+    .pause-menu {
+      position: fixed; inset: 0; z-index: 9000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 56px;
+      padding: 72px 32px;
+      background: rgba(0,0,0,0.66);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      animation: pause-fade-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .pause-menu[hidden] { display: none; }
+    @keyframes pause-fade-in {
+      from { opacity: 0; backdrop-filter: blur(0px); }
+      to   { opacity: 1; backdrop-filter: blur(14px); }
+    }
+
+    .paused-title {
+      font-size: 96px;
+      font-weight: 900;
+      letter-spacing: -0.045em;
+      text-transform: lowercase;
+      line-height: 1;
+      background: linear-gradient(135deg, #ff66aa 0%, #ff8ec7 45%, #b388ff 100%);
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter:
+        drop-shadow(0 0 24px rgba(255, 102, 170, 0.55))
+        drop-shadow(0 0 56px rgba(179, 136, 255, 0.35))
+        drop-shadow(0 6px 32px rgba(0, 0, 0, 0.6));
+      animation: pause-glow 2.6s ease-in-out infinite;
+    }
+    @keyframes pause-glow {
+      0%, 100% {
+        filter:
+          drop-shadow(0 0 24px rgba(255, 102, 170, 0.55))
+          drop-shadow(0 0 56px rgba(179, 136, 255, 0.35))
+          drop-shadow(0 6px 32px rgba(0, 0, 0, 0.6));
+      }
+      50% {
+        filter:
+          drop-shadow(0 0 36px rgba(255, 102, 170, 0.85))
+          drop-shadow(0 0 84px rgba(179, 136, 255, 0.55))
+          drop-shadow(0 6px 32px rgba(0, 0, 0, 0.6));
+      }
+    }
+
+    /* "Dead" mode reuses the pause-menu shell with a red palette. */
+    .pause-menu.is-dead .paused-title {
+      background: linear-gradient(135deg, #ff5d6c 0%, #ff8a9c 45%, #b3001f 100%);
+      -webkit-background-clip: text; background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: dead-glow 2.6s ease-in-out infinite;
+    }
+    @keyframes dead-glow {
+      0%, 100% {
+        filter:
+          drop-shadow(0 0 24px rgba(255, 60, 90, 0.55))
+          drop-shadow(0 0 56px rgba(179, 0, 30, 0.35))
+          drop-shadow(0 6px 32px rgba(0, 0, 0, 0.6));
+      }
+      50% {
+        filter:
+          drop-shadow(0 0 38px rgba(255, 60, 90, 0.90))
+          drop-shadow(0 0 90px rgba(179, 0, 30, 0.55))
+          drop-shadow(0 6px 32px rgba(0, 0, 0, 0.6));
+      }
+    }
+    .pause-menu.is-dead {
+      background:
+        radial-gradient(ellipse at 50% 25%, rgba(255, 60, 90, 0.18) 0%, transparent 55%),
+        rgba(0, 0, 0, 0.74);
+    }
+
+    .button-list {
+      display: flex; flex-direction: column; gap: 14px;
+      min-width: 320px; max-width: 90vw;
+    }
+
+    .pausebutton {
+      display: flex; align-items: center; justify-content: center;
+      height: 58px; padding: 0 36px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.10);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.32em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.85);
+      cursor: pointer;
+      transition: transform 180ms ease, background-color 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 220ms ease;
+      backdrop-filter: blur(6px);
+      user-select: none;
+    }
+    .pausebutton:hover {
+      transform: translateY(-1px);
+      background: rgba(255,255,255,0.10);
+      border-color: rgba(255,255,255,0.28);
+      color: #fff;
+    }
+    .pausebutton:active { transform: translateY(0) scale(0.985); }
+
+    .pausebutton.continue:hover {
+      background: rgba(125, 255, 184, 0.10);
+      border-color: rgba(125, 255, 184, 0.40);
+      color: #a6ffce;
+      box-shadow: 0 8px 28px -10px rgba(125, 255, 184, 0.45);
+    }
+    .pausebutton.retry:hover {
+      background: rgba(140, 180, 255, 0.10);
+      border-color: rgba(140, 180, 255, 0.40);
+      color: #b9d2ff;
+      box-shadow: 0 8px 28px -10px rgba(140, 180, 255, 0.45);
+    }
+    .pausebutton.quit:hover {
+      background: rgba(255, 90, 120, 0.10);
+      border-color: rgba(255, 90, 120, 0.40);
+      color: #ff9aa8;
+      box-shadow: 0 8px 28px -10px rgba(255, 90, 120, 0.45);
+    }
+
+    /* ── Death animation ──────────────────────────────────────────
+       Triggered by playback.js when HP < 0. Three layered effects:
+       1. A red radial vignette pulses in for ~700 ms.
+       2. The gameplay canvas slowly desaturates / blurs / zooms
+          (slow-motion feel, ~1.8 s).
+       3. A solid black overlay fades in on top over ~2.5 s, swallowing
+          the scene before the death menu appears. */
+    #death-vignette {
+      position: fixed; inset: 0; z-index: 8500;
+      pointer-events: none;
+      opacity: 0;
+      background:
+        radial-gradient(ellipse at 50% 50%,
+          rgba(0, 0, 0, 0)        0%,
+          rgba(0, 0, 0, 0)       28%,
+          rgba(140, 0, 0, 0.55)  72%,
+          rgba(60, 0, 0, 0.95)  100%);
+      transition: opacity 1100ms cubic-bezier(0.22, 1, 0.36, 1);
+      will-change: opacity, transform;
+    }
+    #death-vignette.show { opacity: 1; }
+    #death-vignette::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(circle at 50% 50%,
+        rgba(255, 80, 80, 0)   30%,
+        rgba(255, 60, 60, 0.35) 90%);
+      animation: death-pulse 1100ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+      transform-origin: 50% 50%;
+    }
+    @keyframes death-pulse {
+      0%   { transform: scale(1.6); opacity: 0; }
+      35%  { opacity: 1; }
+      100% { transform: scale(1);   opacity: 0.85; }
+    }
+
+    /* Black "fade to black" curtain that slowly takes over the scene
+       after the red vignette. Fully opaque just before the death menu. */
+    #death-fade {
+      position: fixed; inset: 0; z-index: 8700;
+      pointer-events: none;
+      background: #000;
+      opacity: 0;
+      transition: opacity 2200ms cubic-bezier(0.45, 0, 0.55, 1);
+      will-change: opacity;
+    }
+    #death-fade.show { opacity: 1; }
+
+    /* Slow-motion / dying filter on the actual gameplay canvas. */
+    #game-area.is-dying canvas {
+      animation: death-zoom 2400ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+      filter: saturate(0.35) brightness(0.55) blur(1.2px) hue-rotate(-12deg);
+      transition: filter 1800ms ease;
+    }
+    @keyframes death-zoom {
+      0%   { transform: scale(1)    rotate(0deg); }
+      30%  { transform: scale(1.03) rotate(-0.18deg); }
+      100% { transform: scale(1.06) rotate( 0.06deg); }
+    }
+    /* When the dying class is removed (retry/quit) clear filter
+       instantly so the next attempt starts with a pristine canvas. */
+    #game-area:not(.is-dying) canvas {
+      filter: none;
+    }
+  </style>
+
+  <!-- ── rosu-pp-js (WASM) ─────────────────────────────────────────
+       Self-hosted Rust→WASM port of osu_difficulty_calculator. Used by
+       scripts/overlay/pp.js when available to produce bit-for-bit pp /
+       star-rating values matching osu.ppy.sh. The fetch + instantiation
+       runs in parallel with the rest of the engine bootstrap, so by the
+       time the player finishes a song (~2 min) the WASM is ready and
+       the results screen can read pp synchronously off `window.rosu`.
+       Falls back transparently to the manual aim/speed/acc calculator
+       in pp.js if the .wasm fails to load (offline, CSP, etc.). -->
+  <script type="module">
+    import init, * as rosuMod from './scripts/lib/rosu/rosu_pp_js.js';
+    window.rosuReady = init().then(() => {
+      window.rosu = rosuMod;
+      try { console.log('[rosu-pp-js] WASM initialised'); } catch (_) {}
+      return rosuMod;
+    }).catch((err) => {
+      try { console.warn('[rosu-pp-js] init failed, falling back to manual pp.js:', err); } catch (_) {}
+      window.rosu = null;
+      return null;
+    });
+  </script>
+  <script src="scripts/config.js"></script>
+  <script src="scripts/launchgame.js"></script>
+  <script src="scripts/settings.js"></script>
+  <script src="scripts/jsloader.js"></script>
+  <script src="scripts/lib/localforage.min.js"></script>
+</head>
+<body>
+  <div class="game-area" id="game-area" hidden></div>
+
+  <!-- Skip-intro button — appears during long intros. -->
+  <button type="button" id="skip-btn" aria-label="Skip intro">
+    Skip
+    <span class="skip-arrows"><span></span><span></span><span></span></span>
+  </button>
+
+  <!-- Hidden stubs required by launchgame.js (it calls setAttribute on these). -->
+  <div id="main-page" hidden></div>
+  <nav id="main-nav" style="display: none"></nav>
+
+  <div class="pause-menu" id="pause-menu" hidden>
+    <div class="paused-title">paused</div>
+    <div class="button-list">
+      <div class="pausebutton continue" id="pausebtn-continue">Continue</div>
+      <div class="pausebutton retry" id="pausebtn-retry">Retry</div>
+      <div class="pausebutton quit" id="pausebtn-quit">Quit</div>
+    </div>
+  </div>
+
+  <!-- Loading overlay: cover backdrop + single spinner, nothing else. -->
+  <div id="play-overlay">
+    <div class="backdrop" id="play-backdrop"></div>
+    <div class="vignette"></div>
+    <div class="spinner" aria-label="Loading"></div>
+    <div id="play-error"></div>
+
+    <!-- Hidden DOM nodes the engine writes "finished" classes to. -->
+    <div class="engine-status-markers" aria-hidden="true">
+      <div class="progress" id="script-progress"></div>
+      <div class="progress" id="skin-progress"></div>
+      <div class="progress" id="sound-progress"></div>
+    </div>
+  </div>
+
+  <script>
+    // ── Parse URL params ──────────────────────────────────────────────
+    const params = new URLSearchParams(location.search);
+    const sid = params.get("sid");
+    const bid = params.get("bid");
+    const version = params.get("v") || "";
+
+    const overlay = document.getElementById("play-overlay");
+    const backdrop = document.getElementById("play-backdrop");
+    const errorEl = document.getElementById("play-error");
+
+    // Wrap the engine's quitGame so that whenever the user clicks "Quit" in
+    // the in-game pause menu, we also notify the React parent so it can
+    // navigate back to the previous page. The engine assigns window.quitGame
+    // asynchronously inside launchOSU (after the .osz is unzipped + parsed),
+    // so we poll until it appears, then patch it once.
+    function bridgeQuitToParent() {
+      const orig = window.quitGame;
+      if (typeof orig !== "function" || orig.__bridged) return false;
+      const wrapped = function () {
+        let res;
+        try { res = orig.apply(this, arguments); } finally {
+          try { window.parent.postMessage({ type: "webosu2-quit" }, "*"); } catch (_) {}
+        }
+        return res;
+      };
+      wrapped.__bridged = true;
+      window.quitGame = wrapped;
+      return true;
+    }
+    function startQuitBridgePolling() {
+      const t = setInterval(() => {
+        if (bridgeQuitToParent()) clearInterval(t);
+      }, 200);
+      // Safety: stop polling after 60s regardless
+      setTimeout(() => clearInterval(t), 60000);
+    }
+
+    // Preload the beatmap cover as the overlay backdrop. We try a high-res
+    // cover first, then fall back to the card-sized cover.
+    if (sid) {
+      const candidates = [
+        `https://assets.ppy.sh/beatmaps/${sid}/covers/cover@2x.jpg`,
+        `https://assets.ppy.sh/beatmaps/${sid}/covers/cover.jpg`,
+        `https://assets.ppy.sh/beatmaps/${sid}/covers/card@2x.jpg`,
+      ];
+      (function tryLoad(i) {
+        if (i >= candidates.length) return;
+        const img = new Image();
+        img.onload = () => {
+          backdrop.style.backgroundImage = `url("${candidates[i]}")`;
+          backdrop.classList.add("ready");
+        };
+        img.onerror = () => tryLoad(i + 1);
+        img.src = candidates[i];
+      })(0);
+    }
+
+    if (!sid) {
+      errorEl.style.display = "block";
+      errorEl.textContent = "Missing ?sid= parameter — which beatmap should I play?";
+    }
+
+    // ── Download the beatmap (.osz) ───────────────────────────────────
+    let oszBlob = null;
+    let downloadError = null;
+
+    async function downloadBeatmap() {
+      if (!sid) return;
+      const url = getDownloadUrl(sid);
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        oszBlob = await res.blob();
+      } catch (e) {
+        downloadError = e;
+        console.error("[play] download failed:", e);
+        errorEl.style.display = "block";
+        errorEl.textContent = `Beatmap download failed (${e.message}). The mirror may be rate-limiting or offline — try again in a moment.`;
+      }
+    }
+    downloadBeatmap();
+
+    // ── Kick off the engine's JS loader manually ──────────────────────
+    window.liked_sid_set_callbacks = [];
+    if (typeof window.beatmaplistLoadedCallback === "function") {
+      window.beatmaplistLoadedCallback();
+    }
+
+    // ── Poll for engine readiness + download complete, then launch ────
+    function allReady() {
+      return window.scriptReady && window.skinReady && window.soundReady;
+    }
+
+    const launchTimer = setInterval(() => {
+      if (downloadError) { clearInterval(launchTimer); return; }
+      if (!oszBlob) return;
+      if (!allReady()) return;
+      if (typeof window.launchGame !== "function") return;
+      clearInterval(launchTimer);
+
+      try {
+        overlay.classList.add("hidden");
+        setTimeout(() => { overlay.style.display = "none"; }, 440);
+        window.launchGame(oszBlob, bid ? parseInt(bid, 10) : -1, version);
+        // The engine sets window.quitGame asynchronously inside launchOSU
+        // (after the .osz is unzipped + parsed). Start polling so we can
+        // patch it as soon as it exists, then bridge it to the React parent.
+        startQuitBridgePolling();
+      } catch (e) {
+        console.error("[play] launchGame error:", e);
+        overlay.classList.remove("hidden");
+        overlay.style.display = "flex";
+        errorEl.style.display = "block";
+        errorEl.textContent = `Launch failed: ${e.message}`;
+      }
+    }, 120);
+
+    // ── Bridge messages to parent window (for React quit handling) ────
+    window.addEventListener("beforeunload", () => {
+      try { window.parent.postMessage({ type: "webosu2-unload" }, "*"); } catch (_) {}
+    });
+    window.addEventListener("message", (ev) => {
+      if (ev.data && ev.data.type === "webosu2-request-quit") {
+        if (window.quitGame) window.quitGame();
+      }
+    });
+
+    // ── Auto-focus the iframe's window so keyboard events reach the engine ──
+    // Engine listeners (in playback.js) are attached to `window`, so we need
+    // this window to actually have focus inside the parent page.
+    function grabFocus() {
+      try { window.focus(); } catch (_) {}
+      try { document.body.focus({ preventScroll: true }); } catch (_) { document.body.focus(); }
+    }
+    document.body.tabIndex = -1;
+    grabFocus();
+    setTimeout(grabFocus, 200);
+    setTimeout(grabFocus, 800);
+
+    // Re-focus on any pointer interaction inside the iframe.
+    document.addEventListener("pointerdown", grabFocus);
+    document.addEventListener("click", grabFocus);
+
+    // When the parent forwards us a "request-focus" message, grab it too.
+    window.addEventListener("message", (ev) => {
+      if (ev.data && ev.data.type === "webosu2-focus") grabFocus();
+    });
+
+    // ── Skip-intro button ─────────────────────────────────────────────
+    // Show a "Skip" button when there is more than ~4s of lead-in before the
+    // first hit object. Clicking it advances the audio to ~2s before the
+    // first hit and shows a brief flash for feedback.
+    (function initSkipButton() {
+      const SKIP_VISIBLE_THRESHOLD_MS = 4000; // only show when intro > 4s
+      const SKIP_TARGET_OFFSET_MS = 2000;     // skip to 2s before first hit
+      const skipBtn = document.getElementById("skip-btn");
+
+      function getScene() { return window.game && window.game.scene; }
+      function getFirstHitMs(scene) {
+        if (!scene || !scene.hits || scene.hits.length === 0) return null;
+        return scene.hits[0].time;
+      }
+      function getCurrentMs(scene) {
+        if (!scene || !scene.osu || !scene.osu.audio) return null;
+        return scene.osu.audio.getPosition() * 1000;
+      }
+
+      function doSkip() {
+        const scene = getScene();
+        const firstHit = getFirstHitMs(scene);
+        const currentMs = getCurrentMs(scene);
+        if (firstHit == null || currentMs == null) return;
+        const remaining = firstHit - currentMs;
+        if (remaining <= SKIP_VISIBLE_THRESHOLD_MS) return; // nothing to skip
+        const targetMs = firstHit - SKIP_TARGET_OFFSET_MS;
+        const audio = scene.osu.audio;
+        try {
+          // Pause → seek → play. If the audio hasn't actually started yet
+          // (still in lead-in), pause() returns false; we still want to
+          // forcibly set the position and start playing from there.
+          const wasPlaying = audio.pause();
+          audio.position = Math.max(0, targetMs / 1000);
+          audio.play();
+          // Avoid the engine immediately re-pausing in the same frame.
+          // The visible game timer is driven by audio.getPosition(), so this
+          // is enough — the next render tick will jump to the new position.
+        } catch (e) {
+          console.error("[skip] failed:", e);
+        }
+        // Hide instantly after a successful skip.
+        skipBtn.classList.remove("show");
+        skipBtn.blur();
+      }
+
+      skipBtn.addEventListener("click", doSkip);
+
+      // Visibility poll.
+      setInterval(() => {
+        const scene = getScene();
+        if (!scene || !scene.osu || !scene.osu.audio) {
+          skipBtn.classList.remove("show");
+          return;
+        }
+        // Don't show during the pause menu, score summary, or after end.
+        if (scene.game && scene.game.paused) {
+          skipBtn.classList.remove("show");
+          return;
+        }
+        if (scene.ended) {
+          skipBtn.classList.remove("show");
+          return;
+        }
+        const firstHit = getFirstHitMs(scene);
+        const currentMs = getCurrentMs(scene);
+        if (firstHit == null || currentMs == null) {
+          skipBtn.classList.remove("show");
+          return;
+        }
+        const remaining = firstHit - currentMs;
+        if (remaining > SKIP_VISIBLE_THRESHOLD_MS) {
+          skipBtn.classList.add("show");
+        } else {
+          skipBtn.classList.remove("show");
+        }
+      }, 200);
+    })();
+  </script>
+</body>
+</html>
