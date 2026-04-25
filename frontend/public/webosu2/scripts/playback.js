@@ -1665,16 +1665,29 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
                                 fadeNow.classList.add('show');
                             }
                         } catch (_) {}
-                        // Cut the audio immediately if it's still playing.
+                        // Cut the audio IMMEDIATELY — no setTimeout, no
+                        // ramp dependency. Even if the gain ramps weren't
+                        // applied (some AudioContext quirks), this guarantees
+                        // the BufferSourceNode is stopped right now.
                         try {
                             var a = self.osu && self.osu.audio;
-                            if (a && a.audio && a.gain && a.gain.gain) {
-                                var nowT = a.audio.currentTime;
-                                a.gain.gain.cancelScheduledValues(nowT);
-                                a.gain.gain.setValueAtTime(a.gain.gain.value, nowT);
-                                a.gain.gain.linearRampToValueAtTime(0, nowT + 0.15);
+                            if (a) {
+                                // Pull the GainNode straight to 0 with no
+                                // schedule so it's silent on the very next
+                                // sample.
+                                try {
+                                    if (a.gain && a.gain.gain) {
+                                        a.gain.gain.cancelScheduledValues(0);
+                                        a.gain.gain.value = 0;
+                                    }
+                                } catch (_) {}
+                                // Stop the BufferSourceNode hard.
+                                try { a.pause(); } catch (_) {}
+                                // And as a last resort, stop the raw source
+                                // even if pause() returned false for any
+                                // reason.
+                                try { if (a.source) a.source.stop(0); } catch (_) {}
                             }
-                            setTimeout(function () { try { a.pause(); } catch (_) {} }, 200);
                         } catch (_) {}
                         try {
                             if (typeof that.scoreOverlay.showDeathMenu === 'function') {
