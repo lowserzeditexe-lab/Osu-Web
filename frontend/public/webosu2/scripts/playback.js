@@ -327,12 +327,26 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
                 window.addEventListener('wheel', wheelCallback);
             }
 
+            // Robust Esc detection: keyCode is deprecated and some browsers
+            // (and synthesised KeyboardEvents from the parent React frame)
+            // drop it to 0. Accept the modern e.key === 'Escape' too so the
+            // pause / death-menu branches reliably fire even when the
+            // iframe doesn't have native keyboard focus.
+            var isEscKey = function (e) {
+                return (
+                    e.keyCode === game.ESCkeycode
+                    || e.keyCode == game.ESC2keycode
+                    || e.key === 'Escape'
+                    || e.code === 'Escape'
+                );
+            };
+
             var pauseKeyCallback = function (e) {
                 // While dying, Esc (or its alt) skips the slow-mo and pops
                 // the "dead" menu instantly — death animation is cinematic
                 // but players want to retry fast.
                 if (
-                    (e.keyCode === game.ESCkeycode || e.keyCode == game.ESC2keycode)
+                    isEscKey(e)
                     && self.dead
                     && !self.deathMenuShown
                     && typeof self.showDeathMenuNow === 'function'
@@ -345,14 +359,14 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
                     return;
                 }
                 // press esc to pause
-                if ((e.keyCode === game.ESCkeycode || e.keyCode == game.ESC2keycode) && !self.game.paused) {
+                if (isEscKey(e) && !self.game.paused) {
                     self.pause();
                     self.pausing = true; // to prevent resuming at end of first key press
                 }
             };
             var resumeKeyCallback = function (e) {
                 // press and release esc to pause
-                if ((e.keyCode === game.ESCkeycode || e.keyCode == game.ESC2keycode) && self.game.paused) {
+                if (isEscKey(e) && self.game.paused) {
                     if (self.pausing)
                         self.pausing = false;
                     else
@@ -1553,7 +1567,13 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
                                     audio.gain.gain.linearRampToValueAtTime(0.0, now + 1.7);
                                 }
                             } catch (_) {}
-                            setTimeout(function () { try { audio.pause(); } catch (_) {} }, 1900);
+                            // Save the timer id so retry/quit and the
+                            // early-skip path triggered by Esc can clear
+                            // it. Otherwise this delayed pause would fire
+                            // ~1.9 s later — after the user has already
+                            // restarted the song with Retry — and silently
+                            // stop the brand new playback.
+                            self._deathPauseTimer = setTimeout(function () { try { audio.pause(); } catch (_) {} }, 1900);
                         } else {
                             try { self.osu.audio.pause(); } catch (_) {}
                         }
@@ -1627,6 +1647,15 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
                     that.showDeathMenuNow = function () {
                         if (that.deathMenuShown) return;
                         that.deathMenuShown = true;
+                        // Cancel the slow ~1.9 s delayed pause scheduled
+                        // by the death sequence — we're about to pause
+                        // the audio ourselves, and that pending timer
+                        // would otherwise fire AFTER a Retry and silently
+                        // kill the freshly restarted playback.
+                        if (self._deathPauseTimer) {
+                            clearTimeout(self._deathPauseTimer);
+                            self._deathPauseTimer = null;
+                        }
                         // Force the black curtain to opacity 1 instantly so
                         // we never expose a half-faded scene under the menu.
                         try {
@@ -1721,6 +1750,13 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
                     self.game.paused = true;
                 }
                 console.log("playback: retrying");
+                // Clear any pending delayed-pause from the death sequence
+                // — otherwise it would fire mid-retry and kill the new
+                // playback's audio.
+                if (self._deathPauseTimer) {
+                    clearTimeout(self._deathPauseTimer);
+                    self._deathPauseTimer = null;
+                }
                 // Clear the death overlay state so the next attempt starts
                 // with a pristine canvas (no red vignette / black curtain
                 // / dying filter / lingering CSS animation).
@@ -1745,6 +1781,10 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
                     self.game.paused = true;
                 }
                 console.log("playback: quiting");
+                if (self._deathPauseTimer) {
+                    clearTimeout(self._deathPauseTimer);
+                    self._deathPauseTimer = null;
+                }
                 // Clear the death overlay state on quit too — the death
                 // menu has its own fade-out and we don't want a residual
                 // red vignette / black curtain on the song-select page.
