@@ -39,15 +39,17 @@ define([], function () {
             this.addChild(this.barleft);
             this.addChild(this.barright);
 
-            // Countdown digit — original size and position. Only the
-            // texture padding was enlarged so the antialiased edges have
-            // room to render inside the sprite frame.
+            // Countdown digit — pushed UP further (-40 → -80) so there's
+            // visible empty space between the digit and the surrounding bar
+            // sprites that flank it during the countdown. The digit itself
+            // keeps its original size.
             this.number = new PIXI.BitmapText("", { fontName: 'Venera', fontSize: 40 });
             this.number.anchor.set(0.5);
             this.number.x = 0;
-            this.number.y = -40;
-            if (this.number.style) this.number.style.padding = 16;
-            this.number.padding = 16;
+            this.number.y = -80;
+            const numPad = new PIXI.filters.AlphaFilter(1);
+            numPad.padding = 32;
+            this.number.filters = [numPad];
             this.addChild(this.number);
 
             this.resize(windowfield);
