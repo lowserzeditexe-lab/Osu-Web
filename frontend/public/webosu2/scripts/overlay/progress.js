@@ -16,16 +16,14 @@ define([], function () {
             this.field = windowfield;
 
             // ── Combo, bottom-left (replaces the elapsed-time readout) ──
-            // fontSize 44 → 56 + extra margin from the screen edge so the
-            // digit's anti-aliased edges (the "halo") never sit flush against
-            // the sprite frame / window border. Same intent as enlarging the
-            // SVG behind the avatar so its glow can breathe.
-            this.combo = new PIXI.BitmapText("0x", { fontName: 'Venera', fontSize: 56, tint: 0xddffff });
+            // The digit itself stays the same size; we just enlarge the
+            // SPACE around it (style.padding) so the underlying texture
+            // gives the antialiased edges room to render without being
+            // clipped by the sprite frame. Exact same idea as enlarging
+            // the SVG behind the avatar (same circle, bigger box).
+            this.combo = new PIXI.BitmapText("0x", { fontName: 'Venera', fontSize: 44, tint: 0xddffff });
             this.combo.anchor.set(0, 1);
             this.combo.alpha = 0;       // start hidden — only fade in once a hit lands
-            // padding on the BitmapText style adds transparent space around
-            // each glyph in the underlying texture, so anti-aliased edges
-            // are never clipped by the sprite frame.
             if (this.combo.style) this.combo.style.padding = 16;
             this.combo.padding = 16;
             this.addChild(this.combo);
@@ -42,12 +40,11 @@ define([], function () {
         resize(windowfield) {
             this.field = windowfield;
 
-            // Combo bottom-LEFT — generous margin (was 22 → 40) so the digit
-            // has room to breathe and its halo / AA edge isn't pinned to the
-            // window border.
+            // Combo bottom-LEFT — original position, only the texture
+            // padding around the digit was enlarged.
             const unit = Math.min(windowfield.width / 640, windowfield.height / 480);
-            this.combo.x = 40 * unit;
-            this.combo.y = windowfield.height - 40 * unit;
+            this.combo.x = 22 * unit;
+            this.combo.y = windowfield.height - 22 * unit;
 
             // Fallback position (overridden each frame in update() once we
             // can read the live accuracy x/y from ScoreOverlay).
