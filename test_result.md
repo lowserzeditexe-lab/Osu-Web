@@ -1,11 +1,11 @@
 #====================================================================================================
-# Testing Data — Phase D (pp réaliste) + Animation death
+# Testing Data — Cursor cleanup (no white halo + Windows cursor hidden)
 #====================================================================================================
 
 user_problem_statement: |
-  Continuer les modifications du moteur webosu2 :
-    - Phase D : pp réaliste (formule officielle aim/speed/accuracy séparée)
-    - Animation death : vignette rouge + slow-motion à la mort du joueur
+  Modifie le contour blanc curseur ingame et fait en sorte que l'on ne voit pas le curseur "windows"
+  → 1) Curseur in-game identique à celui du menu (pas de halo blanc additif)
+  → 2) Curseur Windows toujours masqué dans tout le jeu (#game-area + canvas)
 
 backend:
   - task: "OSU API credentials (already configured)"
@@ -21,6 +21,45 @@ backend:
         comment: "OSU_CLIENT_ID=52326 + OSU_CLIENT_SECRET déjà configurés depuis sessions précédentes."
 
 frontend:
+  - task: "Curseur in-game sans halo blanc + curseur Windows masqué partout"
+    implemented: true
+    working: true
+    file: "/app/frontend/public/webosu2/scripts/launchgame.js, /app/frontend/public/webosu2/play.html"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          1) launchgame.js — suppression du sprite `cursorGlow` (halo blanc
+             additif scale 0.3 alpha 0.22 BLEND_MODES.ADD) qui produisait le
+             "contour blanc" autour du curseur in-game. On garde uniquement
+             le sprite cursor.png à scale 0.192 (48 px), strictement identique
+             au curseur du menu. game.cursorGlow est explicitement mis à null
+             pour que les protections `if (game.cursorGlow)` du gameLoop et
+             du quitGame restent cohérentes.
+          2) launchgame.js — branche `else if (game.showhwmouse)` retirée :
+             en jeu (hors autoplay/autopilot), on force toujours la classe
+             `shownomouse` sur #game-area, peu importe le réglage utilisateur.
+             Le PIXI cursor est l'unique curseur visible.
+          3) play.html — ajout de règles CSS inline (main.css n'est pas chargé
+             dans play.html → la règle `cursor: none` du shownomouse n'avait
+             aucun effet auparavant) :
+                #game-area, #game-area > canvas,
+                #game-area.shownomouse, #game-area.shownomouse > canvas {
+                    cursor: none !important;
+                }
+             Ciblé uniquement sur #game-area + canvas direct → les overlays
+             pause/death/results (au niveau body, z-index élevé) gardent leur
+             `cursor: pointer` pour les boutons cliquables.
+          Test live in-browser sur sid=765778&bid=1610022 :
+            • gaCursor='none', canvasCursor='none' (curseur Windows masqué).
+            • gaClasses='game-area shownomouse' (forcé peu importe settings).
+            • hasPixiCursor=true, cursorGlow=null (halo supprimé).
+            • Screenshot intro confirme : sprite cursor osu rose net, sans
+              halo blanc additif autour, identique au curseur du menu.
+
   - task: "Phase D — pp réaliste (rewrite scripts/overlay/pp.js)"
     implemented: true
     working: true

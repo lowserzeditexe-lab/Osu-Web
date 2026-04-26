@@ -145,6 +145,19 @@
     #game-area { position: fixed; inset: 0; background: #000; }
     #game-area canvas { display: block; width: 100%; height: 100%; }
 
+    /* ── Hide the OS / Windows cursor inside the game area ─────────
+       The engine renders its own PIXI cursor sprite (see launchgame.js),
+       so the OS cursor is never needed in-game. We force `cursor: none`
+       on the game-area itself and on the gameplay canvas — but NOT on
+       overlay menus (pause / death / results) which sit at higher z-index
+       and need a normal pointer for their clickable buttons. */
+    #game-area,
+    #game-area > canvas,
+    #game-area.shownomouse,
+    #game-area.shownomouse > canvas {
+      cursor: none !important;
+    }
+
     /* ── Pause menu (osu!-style) ────────────────────────────────── */
     .pause-menu {
       position: fixed; inset: 0; z-index: 9000;

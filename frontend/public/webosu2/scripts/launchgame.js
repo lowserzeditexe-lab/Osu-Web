@@ -65,23 +65,17 @@ function launchOSU(osu, beatmapid, version) {
   }
 
   // load cursor
+  // ── In-game cursor identical to the menu cursor: a single cursor.png
+  // sprite at the standard 48 px size, NO additive white halo. The previous
+  // glow sprite produced a bright "white outline" that didn't match the
+  // crisp menu cursor — we drop it entirely here.
   if (!game.showhwmouse || game.autoplay) {
     game.cursor = new PIXI.Sprite(Skin["cursor.png"]);
     game.cursor.anchor.x = game.cursor.anchor.y = 0.5;
     // Source texture is 250×250 → scale 0.192 renders to 48×48 px,
     // matching the global osu! cursor used everywhere else on the site.
     game.cursor.scale.x = game.cursor.scale.y = 0.192 * game.cursorSize;
-    // Subtle additive halo so the cursor stays readable on bright/cluttered
-    // backgrounds (and during the dying filter). Kept proportional to the
-    // 48 px cursor (scale 0.3 → 75 px halo, ~1.56× the cursor radius).
-    var glow = new PIXI.Sprite(Skin["cursor.png"]);
-    glow.anchor.x = glow.anchor.y = 0.5;
-    glow.scale.x = glow.scale.y = 0.3 * game.cursorSize;
-    glow.tint = 0xffffff;
-    glow.alpha = 0.22;
-    glow.blendMode = PIXI.BLEND_MODES.ADD;
-    game.cursorGlow = glow;
-    game.stage.addChild(glow);
+    game.cursorGlow = null;
     game.stage.addChild(game.cursor);
   }
 
@@ -96,13 +90,11 @@ function launchOSU(osu, beatmapid, version) {
     pGameArea.classList.remove("showhwmousemedium");
     pGameArea.classList.remove("showhwmousesmall");
     pGameArea.classList.remove("showhwmousetiny");
-  } else if (game.showhwmouse) {
-    pGameArea.classList.remove("shownomouse");
-    if (game.cursorSize < 0.65) pGameArea.classList.add("showhwmousetiny");
-    else if (game.cursorSize < 0.95)
-      pGameArea.classList.add("showhwmousesmall");
-    else pGameArea.classList.add("showhwmousemedium");
   } else {
+    // ── Hide the Windows / OS cursor everywhere in-game.
+    // We always show the in-engine PIXI cursor instead, so the OS cursor is
+    // never needed. The shownomouse class triggers `cursor: none` (see CSS
+    // in play.html). We remove every showhwmouse* variant defensively.
     pGameArea.classList.add("shownomouse");
     pGameArea.classList.remove("showhwmousemedium");
     pGameArea.classList.remove("showhwmousesmall");
