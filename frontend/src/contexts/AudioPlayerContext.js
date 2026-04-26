@@ -9,6 +9,11 @@ import React, {
 
 const AudioPlayerContext = createContext(null);
 
+// Length (in seconds) of the tail-loop window for full-track playback on the
+// Solo page. The audio loops over [duration - LOOP_WINDOW_SECONDS, duration]
+// — i.e. only the last N seconds of the song play, on repeat. Tweak here.
+const LOOP_WINDOW_SECONDS = 45;
+
 /**
  * AudioPlayerProvider — single shared HTMLAudioElement for the whole app.
  *
@@ -56,7 +61,7 @@ export function AudioPlayerProvider({ children }) {
     const computeLast30Start = () => {
       const d = audio.duration;
       if (!d || !isFinite(d)) return 0;
-      return Math.max(0, d - 30);
+      return Math.max(0, d - LOOP_WINDOW_SECONDS);
     };
 
     // ── ended: rewind + restart. Two flavours:
@@ -270,7 +275,7 @@ export function AudioPlayerProvider({ children }) {
     const audio = audioRef.current;
     if (!audio || !audio.duration) return;
     if (modeRef.current === "last30") {
-      const start = last30StartRef.current || Math.max(0, audio.duration - 30);
+      const start = last30StartRef.current || Math.max(0, audio.duration - LOOP_WINDOW_SECONDS);
       const windowSize = audio.duration - start;
       audio.currentTime = start + ratio * windowSize;
       setProgress(ratio);
