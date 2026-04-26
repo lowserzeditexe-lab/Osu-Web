@@ -28,6 +28,47 @@ backend:
           retournent tous 200.
 
 frontend_critical_fixes:
+  - task: "Suppression complète de la SongList dans Solo"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/SoloPage.js, /app/frontend/src/components/solo/SongDetail.js, /app/frontend/src/contexts/PreloadContext.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          1) SoloPage.js : suppression de <SongList> (right pane 50% width).
+             Panel détail SongDetail désormais full-width (px-10 xl:px-16).
+             Retrait des états devenus inutiles (randomKey, handleRandom,
+             restoring + restoredOnce conservé). AnimatePresence passe d'un
+             slide horizontal (-x) à un fade vertical (-y) plus naturel
+             pour un layout pleine largeur. Imports nettoyés (SongList
+             retiré).
+          2) SongDetail.js : empty-state retravaillé. Avant : "Sélectionne
+             une map / Parcours la liste à droite". Après : "Aucune map
+             sélectionnée / Va dans la Library pour choisir une beatmap…"
+             + bouton CTA <a href="/library"> "Ouvrir la Library" stylisé
+             cohérent avec le design.
+          3) PreloadContext.js : le préload des 48 maps populaires servait
+             UNIQUEMENT à la SongList (pour cliquer instantanément). Plus
+             de consommateur → setPhase("done") immédiat dans le useEffect
+             pour éviter 3-5 min de boot overlay inutile à chaque visite.
+             Le caching audio par-clic via fetchBeatmapAudio (Map mémoire +
+             IndexedDB) est conservé tel quel pour Library/BeatmapDetail.
+          Tests in-browser :
+          • Solo sans map (localStorage clear → click sur card "Solo" depuis
+            menu) : URL=/solo, has_overlay=0, has_list=0, has_empty=1,
+            has_cta=1, CTA text="OUVRIR LA LIBRARY" ✅
+          • Solo avec map restaurée (localStorage seedé id=320118 → click
+            "Solo") : title="No title", panel détail full-width avec stats +
+            leaderboard global, has_list=0 ✅
+          • Boot overlay disparait instantanément (preload neutralisé) ✅
+          Navigation : choix d'une map se fait via Library → BeatmapDetail
+          → bouton "Play" qui route vers /solo?beatmap=ID, ou via le
+          localStorage de la dernière map sélectionnée.
+
   - task: "Boot bloqué sur 'Vérification' (PreloadContext + StrictMode)"
     implemented: true
     working: true

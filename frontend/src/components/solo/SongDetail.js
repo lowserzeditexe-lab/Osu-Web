@@ -53,18 +53,25 @@ export default function SongDetail({
   if (!beatmap) {
     return (
       <div
-        className="h-full flex flex-col items-center justify-center gap-4 text-white/35"
+        className="h-full flex flex-col items-center justify-center gap-5 text-white/35"
         data-testid="solo-detail-empty"
       >
         <div className="h-24 w-24 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center backdrop-blur-xl">
           <Play size={28} strokeWidth={1.2} />
         </div>
         <p className="text-[12px] uppercase tracking-[0.3em] text-white/45">
-          Sélectionne une map
+          Aucune map sélectionnée
         </p>
-        <p className="text-[11px] text-white/30 max-w-xs text-center">
-          Parcours la liste à droite ou utilise la recherche pour commencer.
+        <p className="text-[11px] text-white/30 max-w-xs text-center leading-relaxed">
+          Va dans la <span className="text-white/70 font-semibold">Library</span> pour choisir une beatmap, puis lance-la depuis la page de détail.
         </p>
+        <a
+          href="/library"
+          className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/30 px-5 py-2 text-[11px] uppercase tracking-[0.24em] text-white/70 hover:text-white font-semibold transition-colors"
+          data-testid="solo-detail-empty-cta"
+        >
+          Ouvrir la Library
+        </a>
       </div>
     );
   }

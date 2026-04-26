@@ -3,7 +3,6 @@ import { useSearchParams, Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUpRight } from "lucide-react";
 import BeatmapBackdrop from "@/components/BeatmapBackdrop";
-import SongList from "@/components/solo/SongList";
 import SongDetail from "@/components/solo/SongDetail";
 import { difficultyColor } from "@/lib/format";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
@@ -16,26 +15,18 @@ export default function SoloPage() {
   const [selectedBeatmap, setSelectedBeatmap] = useState(null);
   const [selectedDiff, setSelectedDiff] = useState(null);
   const [mods, setMods] = useState(new Set());
-  const [randomKey, setRandomKey] = useState(0);
   const [searchParams] = useSearchParams();
   // Progress (0..1) of the .osz download for the currently selected beatmap.
   // null while we don't know the size yet, undefined/cleared when audio is
-  // ready to play. Used by SongDetail to render a tiny progress hint while
-  // the user waits the first time they pick a marathon-sized map.
+  // ready to play.
   const [audioFetchProgress, setAudioFetchProgress] = useState(null);
 
-  // If we have a previously selected map cached, the SongList must NOT
-  // auto-select items[0] over our restored choice. We track whether we are
-  // currently restoring so we can suppress the auto-select.
-  const [restoring, setRestoring] = useState(() => {
-    try { return !!localStorage.getItem(STORAGE_KEY); } catch (_) { return false; }
-  });
   const restoredOnceRef = useRef(false);
 
   const { playLast30, stop } = useAudioPlayer();
-  // Track the latest fetch so a fast switch (user clicks song A then B before
-  // A finishes downloading) doesn't end up playing the slow one over the
-  // fresh selection.
+  // Track the latest fetch so a fast switch (user picks A then B before A
+  // finishes downloading) doesn't end up playing the slow one over the fresh
+  // selection.
   const fetchTokenRef = useRef(0);
 
   const handleSelect = useCallback(
@@ -68,42 +59,27 @@ export default function SoloPage() {
 
       // ── Background music: replicate real osu! song-select. We download
       // the full beatmap audio from the .osz, then loop
-      // `[PreviewTime → end-of-track]`. There is intentionally NO short
-      // "preview" bridge while the .osz downloads — playing the OSU API
-      // 10s preview clip first only to swap to the full track at the
-      // exact same PreviewTime caused an audible "double-play" hiccup
-      // (the same musical phrase was heard twice in a row). Better to
-      // wait briefly in silence and then start cleanly on the real track.
+      // `[PreviewTime → end-of-track]`.
       const setId = beatmap.id;
       if (!setId) return;
 
       const myToken = ++fetchTokenRef.current;
       const cachedAlready = hasCachedBeatmapAudio(setId);
-      // Stop any currently playing audio (preview or previous full track)
-      // so we don't bleed sound from the previously selected song into
-      // the silent gap before this map's audio is ready.
       stop();
       setAudioFetchProgress(cachedAlready ? null : 0);
 
       fetchBeatmapAudio(setId, {
         onProgress: (p) => {
-          // Only update progress if this fetch is still the active one.
           if (fetchTokenRef.current === myToken) setAudioFetchProgress(p);
         },
       })
         .then(({ url, previewTimeMs }) => {
-          // Stale fetch (user already moved on)? Discard.
           if (fetchTokenRef.current !== myToken) return;
           setAudioFetchProgress(null);
-          // Pass the mapper-defined PreviewTime so the AudioPlayer can loop
-          // [PreviewTime, end-of-track] just like real osu! song-select.
           playLast30(url, beatmap, { previewTimeMs });
         })
         .catch((err) => {
           if (fetchTokenRef.current !== myToken) return;
-          // Full-track fetch failed (offline, .osz too big, NeriNyan down,
-          // archive without AudioFilename…). Keep silent — we don't want
-          // the short OSU preview to surprise-play here either.
           // eslint-disable-next-line no-console
           console.warn("[solo] fullTrack audio failed:", err?.message || err);
           setAudioFetchProgress(null);
@@ -134,25 +110,18 @@ export default function SoloPage() {
       } catch (_) {}
     }
     const idToFetch = explicitId || savedId;
-    if (!idToFetch) {
-      setRestoring(false);
-      return;
-    }
+    if (!idToFetch) return;
 
     fetchBeatmap(idToFetch)
       .then((bm) => {
         if (bm) handleSelect(bm, { preferredDiffId: savedDiffId });
       })
-      .catch(() => {})
-      .finally(() => setRestoring(false));
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Stop the menu/preview music when leaving Solo. The user explicitly
-  // asked for the auto-playing preview to stay scoped to the Solo page only,
-  // so we tear down the audio source on unmount (navigation to /, /library,
-  // /play, etc.). The looping preview resumes again when the user comes
-  // back to /solo and a beatmap is restored / selected.
+  // ── Stop the menu/preview music when leaving Solo. The auto-playing
+  // preview is scoped to the Solo page only.
   useEffect(() => {
     return () => {
       stop();
@@ -170,10 +139,6 @@ export default function SoloPage() {
     selectedBeatmap?.cover_card_url ||
     selectedBeatmap?.cover_url ||
     null;
-
-  function handleRandom() {
-    setRandomKey((k) => k + 1);
-  }
 
   function toggleMod(key) {
     setMods((prev) => {
@@ -231,17 +196,18 @@ export default function SoloPage() {
         </Link>
       </div>
 
-      {/* Content */}
+      {/* Content — full-width detail panel (SongList removed). The only
+          way to load a map here is now ?beatmap= param (from Library) or
+          the localStorage restore. */}
       <div className="relative z-[2] flex flex-1 overflow-hidden">
-        {/* ── Left: song detail ── */}
         <AnimatePresence mode="wait">
           <motion.div
             key={selectedBeatmap?.id ?? "empty"}
-            initial={{ opacity: 0, x: -18 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -18 }}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
             transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-            className="flex-1 min-w-0 h-full overflow-y-auto pl-10 pr-6 xl:pl-16 xl:pr-10 py-6"
+            className="flex-1 min-w-0 h-full overflow-y-auto px-10 xl:px-16 py-6"
             data-lenis-prevent
             data-testid="solo-detail-panel"
           >
@@ -251,30 +217,10 @@ export default function SoloPage() {
               onDiffChange={setSelectedDiff}
               mods={mods}
               onModToggle={toggleMod}
-              onRandom={handleRandom}
               accent={color}
             />
           </motion.div>
         </AnimatePresence>
-
-        {/* ── Right: cascading skewed song list ── */}
-        <div
-          className="relative w-1/2 flex-shrink-0 h-full"
-          data-testid="solo-song-list"
-        >
-          <SongList
-            key={randomKey}
-            selectedId={selectedBeatmap?.id}
-            selectedBeatmap={selectedBeatmap}
-            selectedDiff={selectedDiff}
-            onSelect={handleSelect}
-            onDiffChange={setSelectedDiff}
-            onRandom={handleRandom}
-            mods={mods}
-            onModToggle={toggleMod}
-            accent={color}
-          />
-        </div>
       </div>
     </div>
   );

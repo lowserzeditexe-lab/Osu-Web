@@ -62,6 +62,15 @@ export function PreloadProvider({ children }) {
     if (_preloadStarted) return;
     _preloadStarted = true;
 
+    // ── Solo's SongList was removed, which was the ONLY consumer of this
+    // bulk preload. We now skip the popular-beatmaps download entirely so
+    // the boot overlay dismisses immediately and the user can pick maps
+    // ad-hoc via Library → BeatmapDetail → Play. Per-click caching is still
+    // handled inside `fetchBeatmapAudio` (Map mémoire + IndexedDB).
+    setPhase("done");
+    return () => {};
+
+    // eslint-disable-next-line no-unreachable
     // We deliberately do NOT cancel on unmount: this is a global one-shot
     // preload, not a per-component effect. React.StrictMode unmount/remount
     // must not abort it.
