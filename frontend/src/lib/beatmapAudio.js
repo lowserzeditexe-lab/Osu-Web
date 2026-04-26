@@ -107,6 +107,52 @@ function pickMime(filename) {
   return "audio/mpeg";
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Fetch with automatic retry for transient failures. Two failure classes:
+ *  • Rate limiting (HTTP 429) — NeriNyan's CDN throttles aggressively when
+ *    we hammer it during the bulk Solo preload. We honour `Retry-After`
+ *    when present, otherwise back off long (2s/5s/10s).
+ *  • Server errors (502/503/504) and raw network errors — back off short
+ *    (1s/2s/4s).
+ * Aborts propagate immediately.
+ */
+async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+  const longBackoff = [2000, 5000, 10000];
+  const shortBackoff = [1000, 2000, 4000];
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.status === 429 && attempt < maxRetries) {
+        // Honour Retry-After if it's a sane integer (seconds).
+        const ra = parseInt(res.headers.get("retry-after") || "", 10);
+        const wait = Number.isFinite(ra) && ra > 0 && ra < 60
+          ? ra * 1000
+          : longBackoff[attempt];
+        await sleep(wait);
+        continue;
+      }
+      if (
+        (res.status === 502 || res.status === 503 || res.status === 504) &&
+        attempt < maxRetries
+      ) {
+        await sleep(shortBackoff[attempt]);
+        continue;
+      }
+      return res;
+    } catch (e) {
+      // AbortError must propagate without retry — caller cancelled.
+      if (e && e.name === "AbortError") throw e;
+      lastErr = e;
+      if (attempt >= maxRetries) throw e;
+      await sleep(shortBackoff[attempt]);
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * Parse a `.osu` file's `[General]` section for `AudioFilename` and
  * `PreviewTime`. We only need these two — both are required for our use
@@ -174,7 +220,7 @@ export async function fetchBeatmapAudio(setId, opts = {}) {
 
     // 4) network — download .osz with progress (no video to keep size sane)
     const oszUrl = NERINYAN_BASE + key + NERINYAN_QUERY;
-    const response = await fetch(oszUrl, {
+    const response = await fetchWithRetry(oszUrl, {
       signal: opts.signal,
       // NeriNyan sets CORS already; no credentials needed.
       mode: "cors",
