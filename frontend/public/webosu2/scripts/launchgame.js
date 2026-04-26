@@ -68,15 +68,15 @@ function launchOSU(osu, beatmapid, version) {
   if (!game.showhwmouse || game.autoplay) {
     game.cursor = new PIXI.Sprite(Skin["cursor.png"]);
     game.cursor.anchor.x = game.cursor.anchor.y = 0.5;
-    // 0.32 ≈ original 0.3 (slightly bigger so the bullseye is visible
-    // without dominating the playfield).
-    game.cursor.scale.x = game.cursor.scale.y = 0.32 * game.cursorSize;
+    // Source texture is 250×250 → scale 0.192 renders to 48×48 px,
+    // matching the global osu! cursor used everywhere else on the site.
+    game.cursor.scale.x = game.cursor.scale.y = 0.192 * game.cursorSize;
     // Subtle additive halo so the cursor stays readable on bright/cluttered
-    // backgrounds (and during the dying filter). Kept small + low alpha to
-    // not feel "huge".
+    // backgrounds (and during the dying filter). Kept proportional to the
+    // 48 px cursor (scale 0.3 → 75 px halo, ~1.56× the cursor radius).
     var glow = new PIXI.Sprite(Skin["cursor.png"]);
     glow.anchor.x = glow.anchor.y = 0.5;
-    glow.scale.x = glow.scale.y = 0.5 * game.cursorSize;
+    glow.scale.x = glow.scale.y = 0.3 * game.cursorSize;
     glow.tint = 0xffffff;
     glow.alpha = 0.22;
     glow.blendMode = PIXI.BLEND_MODES.ADD;
