@@ -28,11 +28,16 @@
 import JSZip from "jszip";
 
 // ── Tunables ────────────────────────────────────────────────────────────────
+// `?nv=1` asks NeriNyan to strip the video file from the .osz, which is by
+// far the biggest contributor to archive size. Without this, even popular
+// maps with a 50 MB MP4 would blow past our cap and the user would hear no
+// audio. We never need the video for the menu music, so this is pure win.
 const NERINYAN_BASE = "https://api.nerinyan.moe/d/";
+const NERINYAN_QUERY = "?nv=1";
 // Hard cap on the .osz size we are willing to fetch + decompress in the tab.
-// Marathon beatmaps can exceed 50 MB and would freeze the page; we just bail
-// out and leave the caller free to fall back to the short preview.
-const MAX_OSZ_BYTES = 60 * 1024 * 1024; // 60 MB
+// Bumped to 200 MB so marathon maps (10+ minute songs) still load cleanly.
+// With `?nv=1` removing video this is plenty for ~99% of ranked beatmaps.
+const MAX_OSZ_BYTES = 200 * 1024 * 1024; // 200 MB
 
 // ── IndexedDB helpers ───────────────────────────────────────────────────────
 const DB_NAME = "osu_audio_cache";
@@ -160,8 +165,8 @@ export async function fetchBeatmapAudio(setId, opts = {}) {
       }
     }
 
-    // 4) network — download .osz with progress
-    const oszUrl = NERINYAN_BASE + key;
+    // 4) network — download .osz with progress (no video to keep size sane)
+    const oszUrl = NERINYAN_BASE + key + NERINYAN_QUERY;
     const response = await fetch(oszUrl, {
       signal: opts.signal,
       // NeriNyan sets CORS already; no credentials needed.

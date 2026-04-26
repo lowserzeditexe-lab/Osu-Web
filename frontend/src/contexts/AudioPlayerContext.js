@@ -9,12 +9,12 @@ import React, {
 
 const AudioPlayerContext = createContext(null);
 
-// Fallback length (in seconds) for the tail-loop window when no
-// mapper-defined PreviewTime is available. Real osu! always loops from
-// `[General].PreviewTime → end-of-track`, but if the .osu file ships
-// with `PreviewTime: -1` (rare but possible) we fall back to "last N
-// seconds of the track" using this constant.
-const LOOP_WINDOW_SECONDS = 45;
+// Fallback start (in seconds) when no mapper-defined PreviewTime is
+// available. We just play the song from the very beginning and rely on
+// native HTMLAudio looping to wrap back to 0 at the end. The user
+// explicitly asked for "PreviewTime → end-of-track, looped" on every
+// beatmap, with no other heuristic — see `playLast30` below.
+const FALLBACK_START_SECONDS = 0;
 
 /**
  * AudioPlayerProvider — single shared HTMLAudioElement for the whole app.
@@ -74,8 +74,8 @@ export function AudioPlayerProvider({ children }) {
     // when a PreviewTime was supplied by the caller (via `playLast30`).
     //
     // If no PreviewTime is available (PreviewTime: -1 in the .osu, or the
-    // .osu wasn't readable), we fall back to "last LOOP_WINDOW_SECONDS of
-    // the track" so the user still hears the climax of the song.
+    // .osu wasn't readable) we play from the beginning of the song and
+    // the loop simply spans `[0, end-of-track]`.
     const computeLast30Start = () => {
       const d = audio.duration;
       if (!d || !isFinite(d)) return 0;
@@ -83,7 +83,7 @@ export function AudioPlayerProvider({ children }) {
       if (previewSec != null && previewSec > 0 && previewSec < d) {
         return previewSec;
       }
-      return Math.max(0, d - LOOP_WINDOW_SECONDS);
+      return FALLBACK_START_SECONDS;
     };
 
     // ── ended: rewind + restart. Two flavours:
@@ -311,7 +311,7 @@ export function AudioPlayerProvider({ children }) {
     const audio = audioRef.current;
     if (!audio || !audio.duration) return;
     if (modeRef.current === "last30") {
-      const start = last30StartRef.current || Math.max(0, audio.duration - LOOP_WINDOW_SECONDS);
+      const start = last30StartRef.current || 0;
       const windowSize = audio.duration - start;
       audio.currentTime = start + ratio * windowSize;
       setProgress(ratio);

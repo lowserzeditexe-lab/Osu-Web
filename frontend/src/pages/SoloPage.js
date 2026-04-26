@@ -32,7 +32,7 @@ export default function SoloPage() {
   });
   const restoredOnceRef = useRef(false);
 
-  const { playLast30, play, stop } = useAudioPlayer();
+  const { playLast30, stop } = useAudioPlayer();
   // Track the latest fetch so a fast switch (user clicks song A then B before
   // A finishes downloading) doesn't end up playing the slow one over the
   // fresh selection.
@@ -66,28 +66,23 @@ export default function SoloPage() {
         );
       } catch (_) { /* private mode etc. */ }
 
-      // ── Background music: the user explicitly asked for the FULL track of
-      // the selected beatmap, looped over its last 30 seconds (just like the
-      // real osu! menu). We download the .osz from NeriNyan, extract the
-      // audio file, and feed the resulting blob URL to the AudioPlayer in
-      // "last30" mode. Subsequent selections of the same map are instant
-      // (in-memory + IndexedDB cache).
-      //
-      // While the .osz downloads, we still kick off the short OSU API
-      // preview (audio_url, ~10 s) so the user gets *some* sound right away
-      // instead of silence — once the full track is ready we swap to it.
+      // ── Background music: replicate real osu! song-select. We download
+      // the full beatmap audio from the .osz, then loop
+      // `[PreviewTime → end-of-track]`. There is intentionally NO short
+      // "preview" bridge while the .osz downloads — playing the OSU API
+      // 10s preview clip first only to swap to the full track at the
+      // exact same PreviewTime caused an audible "double-play" hiccup
+      // (the same musical phrase was heard twice in a row). Better to
+      // wait briefly in silence and then start cleanly on the real track.
       const setId = beatmap.id;
       if (!setId) return;
 
       const myToken = ++fetchTokenRef.current;
       const cachedAlready = hasCachedBeatmapAudio(setId);
-
-      // Short bridge: only play the preview if we don't already have the
-      // full track cached (otherwise we'd hear the preview pop in for half
-      // a second before the real song takes over, which is jarring).
-      if (!cachedAlready && beatmap.audio_url) {
-        play(beatmap);
-      }
+      // Stop any currently playing audio (preview or previous full track)
+      // so we don't bleed sound from the previously selected song into
+      // the silent gap before this map's audio is ready.
+      stop();
       setAudioFetchProgress(cachedAlready ? null : 0);
 
       fetchBeatmapAudio(setId, {
@@ -107,14 +102,14 @@ export default function SoloPage() {
         .catch((err) => {
           if (fetchTokenRef.current !== myToken) return;
           // Full-track fetch failed (offline, .osz too big, NeriNyan down,
-          // archive without AudioFilename…). Keep the preview that's already
-          // playing — at least the user has *some* audio.
+          // archive without AudioFilename…). Keep silent — we don't want
+          // the short OSU preview to surprise-play here either.
           // eslint-disable-next-line no-console
-          console.warn("[solo] fullTrack audio failed, staying on preview:", err?.message || err);
+          console.warn("[solo] fullTrack audio failed:", err?.message || err);
           setAudioFetchProgress(null);
         });
     },
-    [play, playLast30]
+    [playLast30, stop]
   );
 
   // Pre-load beatmap from ?beatmap= param (coming from detail page) or from
