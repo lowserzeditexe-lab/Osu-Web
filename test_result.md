@@ -10,6 +10,50 @@ user_problem_statement: |
   curseur Windows.
 
 backend:
+  - task: "Système utilisateur (clientId anonyme) + import de beatmaps server-side (GridFS)"
+    implemented: true
+    working: true
+    file: "/app/backend-node/services/mongo.js, /app/backend-node/services/oszParser.js, /app/backend-node/routes/users.js, /app/backend-node/routes/imports.js, /app/backend-node/server.js, /app/backend-node/.env"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          1. Connexion MongoDB ajoutée à backend-node (MONGO_URL/DB_NAME dans .env).
+             Deux GridFS buckets: `osz_files` (raw .osz uploads) et `covers`
+             (background image extraite à l'upload pour servir les thumbs sans
+             re-télécharger le .osz). Indexes idempotents (users.id unique,
+             imports.{id,owner_id+created_at}).
+          2. Identité utilisateur anonyme : clientId UUID v4 envoyé en header
+             `X-Client-Id` à chaque requête. Le backend auto-crée l'user à la
+             première requête (`Player<XXXX>`) puis update via PATCH.
+          3. Routes `users` :
+             - GET /api/users/me   → fetch ou create
+             - PATCH /api/users/me → { username, country }, 30 char max,
+               trim, country uppercase 4 char max
+          4. Routes `imports` :
+             - POST /api/imports (multipart, multer in-memory, cap 200 Mo)
+               → unzip avec adm-zip, parse tous les .osu (Title, Artist,
+               Creator, Version, CS/AR/OD/HP, AudioFilename, PreviewTime,
+               BPM via timing points, length via last hit object,
+               background image), stocke .osz + cover dans GridFS, doc
+               metadata dans `imports`. Renvoie un objet shape-compatible
+               OSU API pour l'UI (title, artist, difficulties[], cover_url
+               relatif `/api/imports/:id/cover`).
+             - GET /api/imports → liste des imports du clientId
+             - GET /api/imports/:id → metadata
+             - GET /api/imports/:id/file → stream .osz depuis GridFS (utilisé
+               par play.html via override)
+             - GET /api/imports/:id/cover → stream cover JPEG/PNG/WEBP
+             - DELETE /api/imports/:id → cleanup MongoDB + GridFS atomique
+          5. Tests directs (curl) :
+             • POST users.me + PATCH 200 ✅
+             • POST .osz 11.2 Mo (set 320118 - 14 diffs) → 201 en 250 ms ✅
+             • Round-trip md5sum identique sur /file ✅
+             • DELETE → cleanup chunks + files GridFS vérifié via mongosh ✅
+
   - task: "OSU API credentials + node_modules backend-node"
     implemented: true
     working: true
@@ -28,6 +72,75 @@ backend:
           retournent tous 200.
 
 frontend_critical_fixes:
+  - task: "Système utilisateur (pseudo éditable) + drag-drop import .osz + Play local"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/pages/SoloPage.js, /app/frontend/src/components/solo/ProfileCard.js, /app/frontend/src/components/solo/ImportsList.js, /app/frontend/src/components/solo/DropOverlay.js, /app/frontend/src/contexts/UserContext.js, /app/frontend/src/contexts/ImportsContext.js, /app/frontend/src/lib/clientId.js, /app/frontend/src/lib/apiClient.js, /app/frontend/src/lib/userApi.js, /app/frontend/src/lib/beatmapAudio.js, /app/frontend/src/pages/PlayPage.js, /app/frontend/public/webosu2/play.html, /app/frontend/src/App.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          1. Identité client : `lib/clientId.js` génère un UUID v4 stocké en
+             localStorage et envoyé en header `X-Client-Id` par un axios
+             singleton (`lib/apiClient.js`).
+          2. UserContext + ImportsContext branchés au-dessus de toute l'app
+             dans App.js. UserContext fournit { user, updateUsername },
+             ImportsContext { imports, upload, uploadProgress, uploadError,
+             remove, refresh } avec auto-refresh.
+          3. Solo entièrement repensé :
+             - Layout 2 colonnes : détail full-height à gauche, ProfileCard
+               + ImportsList dans une colonne 340px à droite.
+             - AUCUN auto-restore (suppression de osuweb:lastBeatmap restore
+               + ignore du `?beatmap=` param). Solo s'ouvre toujours vide,
+               aucune musique ne joue automatiquement.
+             - Drag-and-drop full-page : window listeners (dragenter/over/
+               leave/drop) avec compteur anti-flicker, filtrage .osz only,
+               support multi-fichier (upload séquentiel).
+             - DropOverlay (rose, dashed border, blur) avec deux modes :
+               "drop" (avant relâchement) + "uploading" (progress bar 0..100%).
+             - Auto-select de la map fraîchement uploadée + démarrage du
+               preview audio.
+          4. ProfileCard : pseudo éditable inline (clic → input + crayon,
+             Enter/blur save, Esc cancel). Avatar généré via dicebear seedé
+             par clientId. Country/level/pp/rank/accuracy/playcount restent
+             mockés (à wirer plus tard quand on aura un système de scores).
+          5. ImportsList (remplace SongList côté UX) : header avec compteur,
+             bouton "Importer un .osz" qui clique le file input caché, list
+             scrollable avec thumb GridFS (44×44 lazy), titre/artiste/mapper,
+             nb diffs + size en Mo, delete button (confirm dialog) au hover.
+             Empty state "Glisse un fichier .osz ici" cohérent avec le drop.
+          6. fetchBeatmapAudio (lib/beatmapAudio.js) : nouvelle option
+             `overrideUrl` pour pointer le download vers /api/imports/:id/file
+             au lieu de NeriNyan. Le reste du pipeline (unzip client-side
+             pour PreviewTime + audio, cache mémoire + IDB) est strictement
+             identique → preview audio fonctionne pareil pour OSU API et
+             imports locaux.
+          7. Play pour maps importées :
+             - PlayPage.js forwarde `?local=1` au query si présent.
+             - public/webosu2/play.html détecte le flag, et `downloadBeatmap()`
+               va chercher /api/imports/<id>/file (same-origin via ingress)
+               au lieu de NeriNyan. Tout le reste du moteur (rosu-pp parsing,
+               .osz unzip, gameplay loop) est inchangé.
+          8. Tests in-browser (Playwright) : flux end-to-end
+             • Solo vide → profile "PlayerB758/FR", imports list 0 ✅
+             • Edit pseudo → "Reinier" persisté en MongoDB ✅
+             • Upload /tmp/test.osz (11 Mo, set 320118) via setInputFiles
+               → POST /api/imports 201 en ~1.5s ✅
+             • Map auto-sélectionnée, détail panel rempli (No title / Reol /
+               VINXIS / 14 diff / 10.7 Mo) ✅
+             • Cover image servie depuis GridFS (3 fetchs 200 OK) ✅
+             • Audio preview joué depuis /api/imports/.../file ✅
+             • Click PLAY → URL /play/<uuid>?bid=...&local=1 ✅
+             • play.html charge l'engine, télécharge le .osz depuis le
+               backend, splash "NO TITLE / REOL / Irre's Beginner" affiché
+               et gameplay démarre ✅
+          NOTE: 404 sur /api/beatmaps/diff/<uuid>/scores attendu (pas de
+          leaderboard OSU pour les diffs importées localement, l'UI affiche
+          "Pas de classement pour cette difficulté." proprement).
+
   - task: "Suppression complète de la SongList dans Solo"
     implemented: true
     working: true

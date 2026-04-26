@@ -417,6 +417,10 @@
     const sid = params.get("sid");
     const bid = params.get("bid");
     const version = params.get("v") || "";
+    // `local=1` means `sid` is actually a UUID identifying a user-imported
+    // .osz stored on our own backend (GridFS). Instead of hitting NeriNyan,
+    // we fetch from `/api/imports/<id>/file`. Same-origin so no CORS hassle.
+    const isLocal = params.get("local") === "1";
 
     const overlay = document.getElementById("play-overlay");
     const backdrop = document.getElementById("play-backdrop");
@@ -480,7 +484,9 @@
 
     async function downloadBeatmap() {
       if (!sid) return;
-      const url = getDownloadUrl(sid);
+      // Local user-imported map → our own backend; otherwise fall back to
+      // the public mirror (NeriNyan via getDownloadUrl).
+      const url = isLocal ? `/api/imports/${encodeURIComponent(sid)}/file` : getDownloadUrl(sid);
       try {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -489,7 +495,9 @@
         downloadError = e;
         console.error("[play] download failed:", e);
         errorEl.style.display = "block";
-        errorEl.textContent = `Beatmap download failed (${e.message}). The mirror may be rate-limiting or offline — try again in a moment.`;
+        errorEl.textContent = isLocal
+          ? `Local beatmap fetch failed (${e.message}). Try re-importing the .osz from Solo.`
+          : `Beatmap download failed (${e.message}). The mirror may be rate-limiting or offline — try again in a moment.`;
       }
     }
     downloadBeatmap();

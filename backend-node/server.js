@@ -4,11 +4,15 @@ const morgan = require('morgan');
 require('dotenv').config();
 
 const beatmapsRouter = require('./routes/beatmaps');
+const { router: usersRouter } = require('./routes/users');
+const importsRouter = require('./routes/imports');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '8001', 10);
 
-app.use(cors());
+app.use(cors({ exposedHeaders: ['X-Client-Id'] }));
+// JSON body cap stays at 1mb (.osz uploads use multipart and are handled
+// separately by multer inside `/routes/imports.js`).
 app.use(express.json({ limit: '1mb' }));
 app.use(morgan('dev'));
 
@@ -34,6 +38,8 @@ api.get('/menu', async (req, res) => {
 });
 
 api.use('/beatmaps', beatmapsRouter);
+api.use('/users', usersRouter);
+api.use('/imports', importsRouter);
 
 app.use('/api', api);
 

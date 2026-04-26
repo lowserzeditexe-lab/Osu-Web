@@ -24,13 +24,15 @@ export default function PlayPage() {
   const v = sp.get("v") || "";
   const title = sp.get("title") || "";
   const artist = sp.get("artist") || "";
+  const local = sp.get("local") === "1";
 
   const iframeSrc = sid
     ? `/webosu2/play.html?sid=${encodeURIComponent(sid)}` +
       (bid ? `&bid=${encodeURIComponent(bid)}` : "") +
       (v ? `&v=${encodeURIComponent(v)}` : "") +
       (title ? `&title=${encodeURIComponent(title)}` : "") +
-      (artist ? `&artist=${encodeURIComponent(artist)}` : "")
+      (artist ? `&artist=${encodeURIComponent(artist)}` : "") +
+      (local ? `&local=1` : "")
     : null;
 
   // Listen for quit messages from the iframe.

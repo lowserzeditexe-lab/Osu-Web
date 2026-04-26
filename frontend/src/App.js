@@ -23,6 +23,8 @@ import { AudioPlayerProvider, useAudioPlayer } from "@/contexts/AudioPlayerConte
 import { SavedBeatmapsProvider } from "@/contexts/SavedBeatmapsContext";
 import { LibraryFiltersProvider } from "@/contexts/LibraryFiltersContext";
 import { PreloadProvider, usePreload } from "@/contexts/PreloadContext";
+import { UserProvider } from "@/contexts/UserContext";
+import { ImportsProvider } from "@/contexts/ImportsContext";
 import osuCursorPng from "@/assets/cursor.png";
 import osuCursorCur from "@/assets/cursor.cur";
 
@@ -102,15 +104,19 @@ function Shell() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AudioPlayerProvider>
-        <SavedBeatmapsProvider>
-          <LibraryFiltersProvider>
-            <PreloadProvider>
-              <Shell />
-            </PreloadProvider>
-          </LibraryFiltersProvider>
-        </SavedBeatmapsProvider>
-      </AudioPlayerProvider>
+      <UserProvider>
+        <ImportsProvider>
+          <AudioPlayerProvider>
+            <SavedBeatmapsProvider>
+              <LibraryFiltersProvider>
+                <PreloadProvider>
+                  <Shell />
+                </PreloadProvider>
+              </LibraryFiltersProvider>
+            </SavedBeatmapsProvider>
+          </AudioPlayerProvider>
+        </ImportsProvider>
+      </UserProvider>
     </BrowserRouter>
   );
 }

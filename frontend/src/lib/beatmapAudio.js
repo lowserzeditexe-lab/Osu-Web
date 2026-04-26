@@ -180,8 +180,13 @@ function parseGeneralSection(osuText) {
  *
  * Subsequent calls for the same setId are instant (memory + IndexedDB).
  *
- * @param {number|string} setId  beatmapset id
+ * @param {number|string} setId  beatmapset id (or any unique cache key for
+ *                               local imports — combine with `overrideUrl`)
  * @param {object} [opts]
+ * @param {string} [opts.overrideUrl] If set, fetch the .osz from this URL
+ *                                    instead of NeriNyan. Used for the
+ *                                    user's locally-imported .osz blobs
+ *                                    served by /api/imports/:id/file.
  * @param {(progress: number) => void} [opts.onProgress] 0..1 download progress
  * @param {AbortSignal} [opts.signal] optional abort signal
  * @returns {Promise<{ url: string, previewTimeMs: number }>}
@@ -218,11 +223,12 @@ export async function fetchBeatmapAudio(setId, opts = {}) {
       }
     }
 
-    // 4) network — download .osz with progress (no video to keep size sane)
-    const oszUrl = NERINYAN_BASE + key + NERINYAN_QUERY;
+    // 4) network — download .osz with progress. For local imports we hit
+    //    our own backend (`overrideUrl`) instead of NeriNyan; both stream
+    //    a raw .osz so the rest of the pipeline is identical.
+    const oszUrl = opts.overrideUrl || (NERINYAN_BASE + key + NERINYAN_QUERY);
     const response = await fetchWithRetry(oszUrl, {
       signal: opts.signal,
-      // NeriNyan sets CORS already; no credentials needed.
       mode: "cors",
     });
     if (!response.ok) {
