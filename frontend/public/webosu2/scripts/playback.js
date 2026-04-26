@@ -342,22 +342,10 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
             };
 
             var pauseKeyCallback = function (e) {
-                // While dying, Esc (or its alt) skips the slow-mo and pops
-                // the "dead" menu instantly — death animation is cinematic
-                // but players want to retry fast.
-                if (
-                    isEscKey(e)
-                    && self.dead
-                    && !self.deathMenuShown
-                    && typeof self.showDeathMenuNow === 'function'
-                ) {
-                    if (self.deathMenuTimer) {
-                        clearTimeout(self.deathMenuTimer);
-                        self.deathMenuTimer = null;
-                    }
-                    self.showDeathMenuNow();
-                    return;
-                }
+                // While dying we INTENTIONALLY ignore Esc so the user
+                // can't disrupt the death sequence (the death menu pops
+                // automatically once the 2.5 s animation finishes).
+                if (self.dead) return;
                 // press esc to pause
                 if (isEscKey(e) && !self.game.paused) {
                     self.pause();
