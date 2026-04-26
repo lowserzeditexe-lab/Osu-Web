@@ -5,19 +5,12 @@ import { ArrowUpRight } from "lucide-react";
 import BeatmapBackdrop from "@/components/BeatmapBackdrop";
 import SongList from "@/components/solo/SongList";
 import SongDetail from "@/components/solo/SongDetail";
-import SoloPreloadOverlay from "@/components/solo/SoloPreloadOverlay";
 import { difficultyColor } from "@/lib/format";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
-import { fetchBeatmap, fetchBeatmapsCategory } from "@/lib/api";
+import { fetchBeatmap } from "@/lib/api";
 import { fetchBeatmapAudio, hasCachedBeatmapAudio } from "@/lib/beatmapAudio";
 
 const STORAGE_KEY = "osuweb:lastBeatmap";
-// Number of popular maps we eagerly install at Solo page launch. Matches
-// SongList's PAGE_SIZE so the entire initial visible list is ready to play
-// the moment the overlay disappears. Concurrency 2 keeps NeriNyan happy
-// (its CDN aggressively rate-limits with 429 above ~3 parallel requests).
-const PRELOAD_LIMIT = 50;
-const PRELOAD_CONCURRENCY = 2;
 
 export default function SoloPage() {
   const [selectedBeatmap, setSelectedBeatmap] = useState(null);
@@ -38,23 +31,6 @@ export default function SoloPage() {
     try { return !!localStorage.getItem(STORAGE_KEY); } catch (_) { return false; }
   });
   const restoredOnceRef = useRef(false);
-
-  // ── Preload state. We eagerly download every popular map's audio at
-  // launch so that clicking a song produces instant playback. The overlay
-  // is shown until `phase === "done"`, blocking the rest of the UI. We
-  // intentionally do NOT offer a skip button (user requirement: force
-  // full preload).
-  const [preload, setPreload] = useState({
-    phase: "fetching", // "fetching" | "preloading" | "done"
-    total: 0,
-    done: 0,
-    currentTitle: null,
-    failed: [], // [{ id, title, error }]
-  });
-  // Auto-dismiss the overlay a short moment after completion so the user
-  // sees the final "Installation terminée" state for ~700 ms before the
-  // Solo UI fades in.
-  const [overlayVisible, setOverlayVisible] = useState(true);
 
   const { playLast30, stop } = useAudioPlayer();
   // Track the latest fetch so a fast switch (user clicks song A then B before
@@ -169,97 +145,6 @@ export default function SoloPage() {
       })
       .catch(() => {})
       .finally(() => setRestoring(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ── EAGER PRELOAD ─────────────────────────────────────────────────────
-  // On Solo page mount, download every popular beatmap's audio (.osz →
-  // mp3) up-front so that clicking a song produces instant playback. We
-  // run PRELOAD_CONCURRENCY workers in parallel — too many parallel
-  // requests trigger 502 from NeriNyan. The retry-with-backoff in
-  // `fetchBeatmapAudio` smooths over the rest. Permanent failures (after
-  // 3 retries) are collected and shown in the overlay's failure list.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      // Phase 1: fetch the metadata list
-      let beatmaps = [];
-      try {
-        const data = await fetchBeatmapsCategory("popular", {
-          limit: PRELOAD_LIMIT,
-          offset: 0,
-        });
-        beatmaps = data.items || [];
-      } catch (e) {
-        // If even the list fails, we can't preload. Mark as done so the
-        // overlay disappears — the user will see whatever SongList can
-        // recover by itself.
-        if (cancelled) return;
-        setPreload((p) => ({ ...p, phase: "done", total: 0, done: 0 }));
-        // eslint-disable-next-line no-console
-        console.error("[solo-preload] failed to fetch popular list:", e);
-        return;
-      }
-      if (cancelled) return;
-      const total = beatmaps.length;
-      setPreload({
-        phase: "preloading",
-        total,
-        done: 0,
-        currentTitle: null,
-        failed: [],
-      });
-      if (total === 0) {
-        setPreload((p) => ({ ...p, phase: "done" }));
-        return;
-      }
-
-      // Phase 2: parallel preload with bounded concurrency
-      const queue = [...beatmaps];
-      const worker = async () => {
-        while (queue.length > 0 && !cancelled) {
-          const bm = queue.shift();
-          if (!bm) break;
-          // Reflect the in-progress title in the overlay (best-effort —
-          // racey across workers but the user just sees a churn of titles).
-          setPreload((p) => ({
-            ...p,
-            currentTitle: bm.title || `Set ${bm.id}`,
-          }));
-          try {
-            await fetchBeatmapAudio(bm.id);
-            if (cancelled) return;
-            setPreload((p) => ({ ...p, done: p.done + 1 }));
-          } catch (e) {
-            if (cancelled) return;
-            const msg = (e && e.message) ? e.message : String(e);
-            // Trim long error messages so the failure list stays readable.
-            const short = msg.length > 38 ? msg.slice(0, 38) + "…" : msg;
-            setPreload((p) => ({
-              ...p,
-              done: p.done + 1,
-              failed: [
-                ...p.failed,
-                { id: bm.id, title: bm.title || `Set ${bm.id}`, error: short },
-              ],
-            }));
-          }
-        }
-      };
-      const workers = Array.from({ length: PRELOAD_CONCURRENCY }, () => worker());
-      await Promise.all(workers);
-      if (cancelled) return;
-
-      // Phase 3: done. Hold the "terminé" state briefly, then dismiss.
-      setPreload((p) => ({ ...p, phase: "done", currentTitle: null }));
-      setTimeout(() => {
-        if (!cancelled) setOverlayVisible(false);
-      }, 800);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -391,27 +276,6 @@ export default function SoloPage() {
           />
         </div>
       </div>
-
-      {/* ── Eager preload overlay (blocks UI until installation done) ── */}
-      <AnimatePresence>
-        {overlayVisible && (
-          <motion.div
-            initial={{ opacity: 1 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.4, ease: "easeOut" }}
-            className="fixed inset-0 z-[100]"
-          >
-            <SoloPreloadOverlay
-              total={preload.total}
-              done={preload.done}
-              failed={preload.failed}
-              currentTitle={preload.currentTitle}
-              phase={preload.phase}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
