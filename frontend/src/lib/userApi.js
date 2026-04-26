@@ -1,5 +1,21 @@
 import apiClient from "./apiClient";
 
+// The backend stores cover URLs as path-only (`/api/imports/:id/cover`)
+// so they don't bake in the deployment hostname. The browser (and the
+// CSS `background-image: url(...)`) needs absolute URLs, so we promote
+// them right at the API boundary.
+function absolutizeCoverUrls(doc) {
+  if (!doc || typeof doc !== "object") return doc;
+  const base = process.env.REACT_APP_BACKEND_URL || "";
+  for (const k of ["cover_url", "cover_card_url", "cover_full_url"]) {
+    const v = doc[k];
+    if (typeof v === "string" && v.startsWith("/api/")) {
+      doc[k] = `${base}${v}`;
+    }
+  }
+  return doc;
+}
+
 export async function fetchMe() {
   const { data } = await apiClient.get("/users/me");
   return data;
@@ -12,7 +28,7 @@ export async function updateMe(patch) {
 
 export async function listImports() {
   const { data } = await apiClient.get("/imports");
-  return data.items || [];
+  return (data.items || []).map(absolutizeCoverUrls);
 }
 
 export async function uploadImport(file, onProgress) {
@@ -25,7 +41,7 @@ export async function uploadImport(file, onProgress) {
       if (e.total) onProgress(e.loaded / e.total);
     },
   });
-  return data;
+  return absolutizeCoverUrls(data);
 }
 
 export async function deleteImport(id) {

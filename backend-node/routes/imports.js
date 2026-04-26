@@ -33,6 +33,23 @@ const upload = multer({
 function sanitizeImport(doc) {
   if (!doc) return doc;
   const { _id, osz_file_id, cover_file_id, ...rest } = doc;
+  // Backfill aliases for older docs that pre-date these fields. Avoids a
+  // DB migration while keeping the wire shape uniform for the frontend.
+  if (rest.duration_sec == null && rest.length_seconds != null) {
+    rest.duration_sec = rest.length_seconds;
+  }
+  if (rest.mapper == null && rest.creator != null) {
+    rest.mapper = rest.creator;
+  }
+  if (rest.osu_set_id === undefined) {
+    rest.osu_set_id =
+      (Array.isArray(rest.difficulties)
+        ? rest.difficulties.find((d) => d && d.beatmap_set_id)?.beatmap_set_id
+        : null) || null;
+  }
+  if (typeof rest.tags === 'string') {
+    rest.tags = rest.tags.split(/\s+/).filter(Boolean);
+  }
   return rest;
 }
 
@@ -157,6 +174,7 @@ router.post('/', upload.single('osz'), async (req, res) => {
     const difficulties = parsed.diffs.map((d, i) => ({
       id: `${id}-${i}`,
       beatmap_id: d.beatmap_id || null,
+      beatmap_set_id: d.beatmap_set_id || null,
       version: d.version,
       mode: d.mode,
       difficulty_rating: 0,
@@ -177,6 +195,12 @@ router.post('/', upload.single('osz'), async (req, res) => {
       return (a.cs + a.ar + a.od + a.hp) - (b.cs + b.ar + b.od + b.hp);
     });
 
+    // Use the first parsed diff's BeatmapSetID as the canonical osu! set id
+    // (same across all .osu files of a set). Falls back to null for fully
+    // custom/local maps that don't carry an osu! id.
+    const osuSetId = parsed.diffs.find((d) => d.beatmap_set_id)?.beatmap_set_id || null;
+    const lengthSeconds = Math.max(...difficulties.map((d) => d.length_seconds || 0), 0);
+
     const doc = {
       id,
       owner_id: cid,
@@ -186,8 +210,13 @@ router.post('/', upload.single('osz'), async (req, res) => {
       artist: parsed.set.artist,
       artist_unicode: parsed.set.artist_unicode,
       creator: parsed.set.creator,
+      // Alias used by SongDetail (`beatmap.mapper`) and the rest of the
+      // OSU-API-shaped UI. Keep `creator` too for backward compat.
+      mapper: parsed.set.creator,
       source: parsed.set.source,
-      tags: parsed.set.tags,
+      tags: typeof parsed.set.tags === 'string'
+        ? parsed.set.tags.split(/\s+/).filter(Boolean)
+        : (parsed.set.tags || []),
       audio_filename: parsed.set.audio_filename,
       preview_time_ms: parsed.set.preview_time_ms || 0,
       background_filename: parsed.set.background_filename,
@@ -199,7 +228,14 @@ router.post('/', upload.single('osz'), async (req, res) => {
       // detail panel's compact stats line.
       difficulty: 0,
       bpm: difficulties[0]?.bpm || null,
-      length_seconds: Math.max(...difficulties.map((d) => d.length_seconds || 0), 0),
+      length_seconds: lengthSeconds,
+      // Alias used by SongCard / SongDetail (`beatmap.duration_sec`).
+      duration_sec: lengthSeconds,
+      // Official osu! beatmap_set_id extracted from the .osu metadata.
+      // Used by SongDetail to build the external osu.ppy.sh link and to
+      // hand the OFFICIAL leaderboard for this set to the Leaderboard
+      // component. May be null for custom/personal maps.
+      osu_set_id: osuSetId,
       osz_file_id: oszFileId,
       cover_file_id: coverFileId,
       cover_content_type: parsed.coverContentType,

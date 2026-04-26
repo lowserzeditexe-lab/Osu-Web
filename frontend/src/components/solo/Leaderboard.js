@@ -249,7 +249,7 @@ function ScoreRow({ score, idx, accent = "#ff66aa", diffId, onOpen }) {
 // ──────────────────────────────────────────────────────────────
 // Main component
 // ──────────────────────────────────────────────────────────────
-export default function Leaderboard({ diffId, setId, status, beatmap, diff, accent = "#ff66aa" }) {
+export default function Leaderboard({ diffId, setId, status, beatmap, diff, accent = "#ff66aa", isLocalImport = false }) {
   const [source, setSource] = useState("osu"); // "osu" | "osuweb"
   const [scores, setScores] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -261,9 +261,15 @@ export default function Leaderboard({ diffId, setId, status, beatmap, diff, acce
 
   // Only these osu! statuses have a global leaderboard that counts scores.
   // Anything else (pending / wip / graveyard) → no scores exist on osu.ppy.sh.
+  // For local imports we don't know the official status — we let the API
+  // call decide (it'll 404 on unranked maps, which our error handler shows
+  // as "no leaderboard"). That's the right UX: a freshly-imported ranked
+  // map immediately shows its real osu! global ranking.
   const RANKED_STATUSES = ["ranked", "approved", "qualified", "loved"];
   const isLeaderboardEligible =
-    !status || RANKED_STATUSES.includes(String(status).toLowerCase());
+    isLocalImport ||
+    !status ||
+    RANKED_STATUSES.includes(String(status).toLowerCase());
 
   useEffect(() => {
     // reset state when diff or source changes
@@ -366,6 +372,24 @@ export default function Leaderboard({ diffId, setId, status, beatmap, diff, acce
 
   const body = useMemo(() => {
     if (!diffId) {
+      if (isLocalImport) {
+        return (
+          <div
+            className="flex flex-col items-center justify-center gap-1.5 text-center px-3 py-6 rounded-md border border-white/10 bg-white/[0.02]"
+            data-testid="leaderboard-local-no-id"
+          >
+            <Trophy size={16} strokeWidth={1.4} className="text-white/30" />
+            <p className="text-[12px] text-white/60 font-medium">
+              Pas de classement officiel
+            </p>
+            <p className="text-[11px] text-white/40 max-w-[300px] leading-snug">
+              Cette map importée n'a pas d'ID osu! dans ses métadonnées.
+              Le classement global n'est disponible que pour les maps
+              publiées sur osu.ppy.sh.
+            </p>
+          </div>
+        );
+      }
       return (
         <div className="text-[11.5px] text-white/35 italic px-1 py-2">
           Sélectionne une difficulté pour voir le classement.
@@ -460,7 +484,7 @@ export default function Leaderboard({ diffId, setId, status, beatmap, diff, acce
         ))}
       </div>
     );
-  }, [diffId, source, loading, error, restricted, scores, accent, isLeaderboardEligible, status]);
+  }, [diffId, source, loading, error, restricted, scores, accent, isLeaderboardEligible, status, isLocalImport]);
 
   return (
     <>

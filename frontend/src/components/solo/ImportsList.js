@@ -1,27 +1,33 @@
-import React, { useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FileMusic, Trash2, Upload, Music2 } from "lucide-react";
+import { FileMusic, Trash2, Upload, Loader2 } from "lucide-react";
+import SongCard from "./SongCard";
+import DiffList from "./DiffList";
 import { useImports } from "@/contexts/ImportsContext";
 
-function formatBytes(n) {
-  if (!n) return "—";
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} Ko`;
-  return `${(n / (1024 * 1024)).toFixed(1)} Mo`;
-}
-
 /**
- * Right-column list of the current user's imported beatmaps. Replaces the
- * removed OSU-API SongList. Empty state is a clear "drag a .osz here"
- * call-to-action with an alternative "browse files" button.
+ * Right-column list of the user's imported beatmaps. Renders each import
+ * with the same parallelogram SongCard used across the rest of Solo, and
+ * expands the selected card with a DiffList of the diffs found inside the
+ * .osz. Empty state is a clear "drag a .osz here" CTA.
+ *
+ * The header is sticky-ish (always visible) and contains:
+ *   • count of current imports
+ *   • file picker button (mirrors the full-page drag-and-drop)
  */
 export default function ImportsList({
   selectedId,
+  selectedBeatmap,
+  selectedDiff,
   onSelect,
+  onDiffChange,
   onPickFiles,
   accent = "#ff66aa",
 }) {
   const { imports, loading, remove } = useImports();
   const fileInputRef = useRef(null);
+  const scrollRef = useRef(null);
+  const selectedRef = useRef(null);
 
   function handlePickClick() {
     fileInputRef.current?.click();
@@ -30,38 +36,38 @@ export default function ImportsList({
   function handleFileInputChange(e) {
     const files = Array.from(e.target.files || []);
     if (files.length && onPickFiles) onPickFiles(files);
-    // Reset so picking the same file twice still triggers change.
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
+  // Scroll-to-selected when selection changes from outside (e.g. the
+  // Random button) so the chosen card isn't off-screen.
+  useEffect(() => {
+    if (selectedRef.current && scrollRef.current) {
+      selectedRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [selectedId]);
+
   return (
-    <div
-      className="flex h-full flex-col rounded-2xl border border-white/10 bg-black/55 backdrop-blur-xl overflow-hidden"
-      data-testid="solo-imports-list"
-    >
-      {/* Header + drop CTA */}
-      <div className="flex-shrink-0 px-4 py-3 border-b border-white/[0.06]">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <Music2 size={14} strokeWidth={2.2} className="text-white/60" />
-            <span className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-bold">
-              Mes beatmaps
-            </span>
-          </div>
-          <span className="text-[10px] text-white/40 tabular-nums">
-            {loading ? "…" : imports.length}
+    <div className="flex flex-col h-full" data-testid="solo-imports-list">
+      {/* ── Header (count + picker) ─────────────────────────────── */}
+      <div className="flex-shrink-0 mx-6 mr-12 pt-5 pb-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handlePickClick}
+            data-testid="solo-imports-pick-button"
+            className="flex-1 flex items-center justify-center gap-2 h-[36px] rounded-full border border-dashed border-white/15 bg-black/45 backdrop-blur-xl hover:bg-white/[0.05] hover:border-white/40 text-[11px] uppercase tracking-[0.20em] font-semibold text-white/70 hover:text-white transition-colors"
+          >
+            <Upload size={12} strokeWidth={2.2} />
+            Importer un .osz
+          </button>
+          <span
+            className="inline-flex items-center justify-center min-w-[36px] h-[36px] px-3 rounded-full border border-white/10 bg-black/45 backdrop-blur-xl text-[10.5px] uppercase tracking-[0.22em] text-white/50 font-bold tabular-nums"
+            data-testid="solo-imports-count"
+          >
+            {loading ? <Loader2 size={11} className="animate-spin" /> : imports.length}
           </span>
         </div>
-
-        <button
-          type="button"
-          onClick={handlePickClick}
-          data-testid="solo-imports-pick-button"
-          className="w-full flex items-center justify-center gap-2 h-[36px] rounded-xl border border-dashed border-white/20 bg-white/[0.03] hover:bg-white/[0.06] hover:border-white/40 text-[11px] uppercase tracking-[0.20em] font-semibold text-white/65 hover:text-white transition-colors"
-        >
-          <Upload size={12} strokeWidth={2.2} />
-          Importer un .osz
-        </button>
         <input
           ref={fileInputRef}
           type="file"
@@ -73,82 +79,72 @@ export default function ImportsList({
         />
       </div>
 
-      {/* List */}
-      <div className="flex-1 min-h-0 overflow-y-auto py-2 px-2" data-lenis-prevent>
+      {/* ── Scrollable beatmap cards ────────────────────────────── */}
+      <div
+        ref={scrollRef}
+        data-lenis-prevent
+        className="flex-1 overflow-y-auto overflow-x-hidden py-2 pl-24 pr-16 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-white/10"
+        style={{ perspective: "900px", overscrollBehavior: "contain" }}
+      >
         {loading ? (
-          <div className="py-8 text-center text-[11px] uppercase tracking-[0.2em] text-white/35">
-            Chargement…
+          <div className="flex items-center justify-center h-40">
+            <Loader2 size={20} className="animate-spin text-white/40" />
           </div>
         ) : imports.length === 0 ? (
-          <EmptyState accent={accent} />
+          <EmptyState accent={accent} onPick={handlePickClick} />
         ) : (
           <AnimatePresence initial={false}>
-            {imports.map((bm) => {
-              const isSelected = bm.id === selectedId;
+            {imports.map((bm, idx) => {
+              const isSelected = selectedId === bm.id;
+              const fullBm =
+                isSelected && selectedBeatmap?.id === bm.id ? selectedBeatmap : bm;
               return (
-                <motion.button
+                <motion.div
                   key={bm.id}
-                  type="button"
                   layout
                   initial={{ opacity: 0, y: -6 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -6 }}
-                  onClick={() => onSelect && onSelect(bm)}
-                  data-testid="solo-imports-item"
-                  data-import-id={bm.id}
-                  className={`group w-full flex items-center gap-3 rounded-xl px-2.5 py-2 mb-1 text-left transition-colors ${
-                    isSelected
-                      ? "bg-white/[0.10] border border-white/15"
-                      : "hover:bg-white/[0.04] border border-transparent"
-                  }`}
-                  style={isSelected ? { boxShadow: `inset 0 0 0 1px ${accent}55` } : {}}
+                  ref={isSelected ? selectedRef : null}
+                  className="py-[3px] relative group/import"
                 >
-                  {/* Cover thumb */}
-                  <div className="flex-shrink-0 h-[44px] w-[44px] rounded-lg overflow-hidden bg-white/[0.05] border border-white/[0.08]">
-                    {bm.cover_card_url ? (
-                      <img
-                        src={`${process.env.REACT_APP_BACKEND_URL || ""}${bm.cover_card_url}`}
-                        alt=""
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-white/25">
-                        <FileMusic size={18} strokeWidth={1.4} />
-                      </div>
-                    )}
-                  </div>
+                  <SongCard
+                    beatmap={bm}
+                    selected={isSelected}
+                    onClick={() => onSelect && onSelect(bm)}
+                    index={idx}
+                  />
 
-                  {/* Text */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[12.5px] font-bold text-white truncate leading-tight">
-                      {bm.title || bm.original_filename}
-                    </p>
-                    <p className="text-[10.5px] text-white/55 truncate mt-0.5">
-                      {bm.artist || "unknown"}
-                      {bm.creator ? <span className="text-white/35"> · {bm.creator}</span> : null}
-                    </p>
-                    <p className="text-[9.5px] text-white/35 mt-0.5 tabular-nums">
-                      {bm.difficulties?.length || 0} diff·{formatBytes(bm.osz_size_bytes)}
-                    </p>
-                  </div>
-
-                  {/* Delete */}
+                  {/* Delete button — only visible on hover, sits over the
+                      card in absolute, doesn't affect layout. */}
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (window.confirm(`Supprimer « ${bm.title} » \u2014 cette action est irr\u00e9versible.`)) {
+                      if (
+                        window.confirm(
+                          `Supprimer « ${bm.title} » \u2014 cette action est irr\u00e9versible.`
+                        )
+                      ) {
                         remove(bm.id).catch(console.error);
                       }
                     }}
                     title="Supprimer"
                     data-testid="solo-imports-delete"
-                    className="flex-shrink-0 h-7 w-7 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                    data-import-id={bm.id}
+                    className="absolute top-1/2 -translate-y-1/2 right-2 h-7 w-7 rounded-md text-white/35 hover:text-red-400 bg-black/55 hover:bg-red-500/15 border border-white/10 hover:border-red-400/40 backdrop-blur-md opacity-0 group-hover/import:opacity-100 transition-all flex items-center justify-center z-[2]"
                   >
                     <Trash2 size={13} strokeWidth={1.8} />
                   </button>
-                </motion.button>
+
+                  {isSelected && fullBm.difficulties?.length > 0 && (
+                    <DiffList
+                      beatmap={fullBm}
+                      selectedDiff={selectedDiff}
+                      onSelect={onDiffChange}
+                    />
+                  )}
+                </motion.div>
               );
             })}
           </AnimatePresence>
@@ -158,21 +154,33 @@ export default function ImportsList({
   );
 }
 
-function EmptyState({ accent }) {
+function EmptyState({ accent, onPick }) {
   return (
-    <div className="px-3 py-10 flex flex-col items-center text-center gap-3" data-testid="solo-imports-empty">
+    <div
+      className="px-3 py-12 flex flex-col items-center text-center gap-3"
+      data-testid="solo-imports-empty"
+    >
       <div
-        className="h-14 w-14 rounded-xl flex items-center justify-center border border-dashed"
+        className="h-16 w-16 rounded-2xl flex items-center justify-center border border-dashed"
         style={{ borderColor: `${accent}66`, color: accent }}
       >
-        <FileMusic size={22} strokeWidth={1.5} />
+        <FileMusic size={26} strokeWidth={1.4} />
       </div>
       <p className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">
         Aucune beatmap
       </p>
-      <p className="text-[10.5px] text-white/40 leading-relaxed max-w-[230px]">
-        Glisse un fichier <span className="font-semibold text-white/70">.osz</span> ici, ou clique « Importer un .osz » au dessus.
+      <p className="text-[11px] text-white/40 leading-relaxed max-w-[260px]">
+        Glisse un fichier <span className="font-semibold text-white/70">.osz</span> n'importe où sur la page,
+        ou clique ci-dessous pour parcourir tes fichiers.
       </p>
+      <button
+        type="button"
+        onClick={onPick}
+        className="mt-1 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] hover:bg-white/[0.08] hover:border-white/30 px-4 py-1.5 text-[10.5px] uppercase tracking-[0.24em] text-white/70 hover:text-white font-semibold transition-colors"
+      >
+        <Upload size={11} strokeWidth={2} />
+        Parcourir
+      </button>
     </div>
   );
 }

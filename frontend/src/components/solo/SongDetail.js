@@ -83,6 +83,19 @@ export default function SongDetail({
     (modified.od != null && Math.abs((modified.od ?? 0) - (base.od ?? 0)) > 0.01) ||
     (modified.hp != null && Math.abs((modified.hp ?? 0) - (base.hp ?? 0)) > 0.01);
 
+  // For local-imported beatmaps the internal `beatmap.id` is a UUID and
+  // the per-diff `id` is `<importId>-<i>` — neither resolves on osu.ppy.sh.
+  // The .osu file metadata however carries the OFFICIAL osu! beatmap_id /
+  // beatmap_set_id, which we surface via `osu_set_id` (set-level) and
+  // `selectedDiff.beatmap_id` (per-diff). We use those for the external
+  // link and the global leaderboard so users see the real osu! ranking
+  // for the map they imported.
+  const isLocalImport = Boolean(beatmap?.is_local_import);
+  const officialSetId = isLocalImport ? beatmap?.osu_set_id : beatmap?.id;
+  const officialDiffId = isLocalImport
+    ? selectedDiff?.beatmap_id || null
+    : selectedDiff?.id || null;
+
   const effectiveBpm = modified.bpm ?? base.bpm;
   const effectiveDuration = Math.round(
     (beatmap.duration_sec ?? 0) / (modified.length_rate || 1)
@@ -101,16 +114,29 @@ export default function SongDetail({
             {beatmap.title}
           </h1>
           <a
-            href={`https://osu.ppy.sh/beatmapsets/${beatmap.id}`}
+            href={
+              officialSetId
+                ? `https://osu.ppy.sh/beatmapsets/${officialSetId}`
+                : "#"
+            }
             target="_blank"
             rel="noreferrer"
-            className="mt-2 xl:mt-3 shrink-0 inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/40 backdrop-blur-xl px-2.5 py-1 text-[11px] font-semibold tabular-nums text-white/60 hover:text-white hover:border-white/25 transition-colors"
+            onClick={(e) => { if (!officialSetId) e.preventDefault(); }}
+            className={`mt-2 xl:mt-3 shrink-0 inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/40 backdrop-blur-xl px-2.5 py-1 text-[11px] font-semibold tabular-nums transition-colors ${
+              officialSetId
+                ? "text-white/60 hover:text-white hover:border-white/25"
+                : "text-white/30 cursor-not-allowed"
+            }`}
             style={{ boxShadow: `0 0 0 0 ${color}00` }}
-            title={`Beatmapset ID · ouvrir sur osu.ppy.sh`}
+            title={
+              officialSetId
+                ? "Beatmapset ID · ouvrir sur osu.ppy.sh"
+                : "Map locale — pas d'ID osu! disponible"
+            }
             data-testid="solo-detail-id"
           >
             <Hash size={11} strokeWidth={2} />
-            <span>{beatmap.id}</span>
+            <span>{officialSetId || "local"}</span>
           </a>
         </div>
         <p className="mt-2 text-[17px] text-white/70 font-medium">{beatmap.artist}</p>
@@ -211,12 +237,13 @@ export default function SongDetail({
 
       {/* Leaderboard — directly attached to the map info, flexes to remaining height */}
       <Leaderboard
-        diffId={selectedDiff?.id || null}
-        setId={beatmap?.id || null}
-        status={beatmap?.status || null}
+        diffId={officialDiffId}
+        setId={officialSetId}
+        status={beatmap?.status || (isLocalImport ? "graveyard" : null)}
         beatmap={beatmap}
         diff={selectedDiff}
         accent={color}
+        isLocalImport={isLocalImport}
       />
     </div>
   );

@@ -177,6 +177,42 @@ DifficultyMultiplier = `floor((CS + HP + OD) / 38) + 2` clampé à [2..6].
 ## Backlog (P2 restant)
 - Hit sounds (whistle / finish / clap par addition set personnalisé).
 - ColorOverride par map (couleurs de combo personnalisées).
+- Système de scores local côté serveur + stats profil dynamiques (level/pp/rank/acc/playcount)
+  alimentés par les vraies parties jouées (actuellement valeurs mockées dans `ProfileCard`).
+- Bouton "Télécharger" de la Library qui POST vers `/api/imports` au lieu d'un download navigateur.
+- OAuth Google (Emergent-managed) pour remplacer le `clientId` anonyme localStorage.
+
+### 26 Feb 2026 — Solo : Imports utilisateurs + UI "comme avant" + Leaderboard officiel
+- **Backend node `routes/imports.js`** : ajout des champs `duration_sec`, `mapper`,
+  `osu_set_id` (extraits du parser .osz) sur le doc d'import + alias `tags` array.
+  `sanitizeImport()` rétro-compatible pour les anciens docs sans ces champs.
+  Chaque diff porte désormais `beatmap_set_id` + `beatmap_id` officiels osu! tirés
+  des métadonnées `.osu`.
+- **`/app/frontend/src/lib/userApi.js`** : `absolutizeCoverUrls()` promu les
+  URLs `/api/imports/.../cover` en absolues à la frontière API → SongCard et
+  DiffList consomment les imports comme n'importe quel beatmap OSU API sans
+  branchements spéciaux.
+- **`/app/frontend/src/components/solo/ImportsList.js`** : refactor complet pour
+  utiliser **`SongCard` (parallélogramme) + `DiffList`** comme l'ancien `SongList`.
+  Header avec bouton "Importer un .osz" + compteur. Empty state affiche le drop
+  hint avec accent. Bouton delete absolute en hover sur chaque carte.
+- **`/app/frontend/src/pages/SoloPage.js`** : restructuration colonne droite —
+  cartes scrollables en haut (`flex-1 min-h-0`), `ProfileCard` figée en bas
+  (`flex-shrink-0 mx-6 mr-12 pb-5`). Largeur `w-[440px] xl:w-[500px] 2xl:w-[560px]`
+  pour matcher l'ancien `SongList`.
+- **`/app/frontend/src/components/solo/SongDetail.js`** : pour les imports locaux,
+  `Leaderboard` reçoit le **`beatmap_id` officiel** (depuis `selectedDiff.beatmap_id`)
+  et le **`beatmap_set_id` officiel** (`beatmap.osu_set_id`) au lieu des UUID
+  internes → le classement global osu.ppy.sh fonctionne 1:1 avec la map importée.
+  Le lien externe vers `osu.ppy.sh/beatmapsets/{id}` utilise aussi l'ID officiel.
+- **`/app/frontend/src/components/solo/Leaderboard.js`** : nouvelle prop
+  `isLocalImport` qui bypass la garde `RANKED_STATUSES` (on ne connaît pas le
+  status d'une map importée → on laisse l'API décider). Empty state dédié si
+  la map locale n'a pas de `BeatmapID:` dans son `.osu`.
+
+Validé en e2e via Playwright : upload `.osz` → SongCard parallèle s'affiche →
+sélection → DiffList expansé → leaderboard montre 50 vrais scores osu! (Paranoia
+Agent, -sakuu-, etc.) avec ranks SS+ pour la map ID `760464` / set `320118`.
 
 ## Tech stack
 - Frontend : Vanilla JS, PIXI.js v6, AMD modules (require.js).

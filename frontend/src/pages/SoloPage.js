@@ -282,22 +282,32 @@ export default function SoloPage() {
           </motion.div>
         </AnimatePresence>
 
-        {/* Right: profile + imports list */}
-        <div className="flex-shrink-0 w-[340px] h-full flex flex-col gap-3" data-testid="solo-right-column">
-          <ProfileCard
-            accent={color}
-            beatmap={selectedBeatmap}
-            selectedDiff={selectedDiff}
-            mods={mods}
-            onModToggle={toggleMod}
-            onRandom={imports.length > 1 ? handleRandom : null}
-          />
+        {/* Right: cards (top, scrollable) + profile (bottom). Same layout
+            as the legacy SongList column so the visual rhythm is preserved
+            even though the data source is local. */}
+        <div
+          className="flex-shrink-0 w-[440px] xl:w-[500px] 2xl:w-[560px] h-full flex flex-col"
+          data-testid="solo-right-column"
+        >
           <div className="flex-1 min-h-0">
             <ImportsList
               selectedId={selectedBeatmap?.id}
+              selectedBeatmap={selectedBeatmap}
+              selectedDiff={selectedDiff}
               onSelect={handleSelect}
+              onDiffChange={setSelectedDiff}
               onPickFiles={handleFiles}
               accent={color}
+            />
+          </div>
+          <div className="flex-shrink-0 mx-6 mr-12 pb-5 pt-2">
+            <ProfileCard
+              accent={color}
+              beatmap={selectedBeatmap}
+              selectedDiff={selectedDiff}
+              mods={mods}
+              onModToggle={toggleMod}
+              onRandom={imports.length > 1 ? handleRandom : null}
             />
           </div>
         </div>
