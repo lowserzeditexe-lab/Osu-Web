@@ -22,13 +22,24 @@ export function AudioPlayerProvider({ children }) {
     audioRef.current = audio;
 
     // Bulletproof loop: even though `audio.loop = true` should be enough,
-    // some browsers / mobile Safari versions still fire `ended` near the
-    // end of the clip. We catch it and seek back to 0 + replay manually so
-    // the preview never stops on its own. A no-op when loop=true works
-    // natively (the event simply doesn't fire).
+    // some browsers (notably Brave with shields, Safari, certain mobile
+    // versions) still fire `ended` near the end of cross-origin audio.
+    // We re-arm the source and replay manually so the preview never stops.
+    // Re-asserting loop=true and calling load() before play() handles cases
+    // where Brave drops the loop flag after a stream completes.
     const onEnded = () => {
       try {
+        audio.loop = true;
         audio.currentTime = 0;
+        // Some browsers leave the element in an "ended" readyState; nudging
+        // it via load() forces a clean re-arm before play().
+        if (audio.ended) {
+          const src = audio.src;
+          if (src) {
+            audio.src = src;
+            audio.load();
+          }
+        }
         const p = audio.play();
         if (p && typeof p.catch === "function") {
           p.catch(() => { setIsPlaying(false); setLoading(false); });
@@ -74,6 +85,11 @@ export function AudioPlayerProvider({ children }) {
     if (!beatmap?.audio_url) return;
     const audio = audioRef.current;
     if (!audio) return;
+    // Re-assert loop=true here in addition to the once-at-mount setup. Some
+    // browsers (notably Brave with shields, mobile Safari) reset this flag
+    // when the `src` is changed via `audio.src = ...` + `audio.load()`,
+    // which would cause the preview to play exactly once and stop. Setting
+    // it AFTER load() guarantees the property survives source changes.
     if (currentBeatmap?.id !== beatmap.id) {
       audio.pause();
       audio.src = beatmap.audio_url;
@@ -82,6 +98,7 @@ export function AudioPlayerProvider({ children }) {
       setProgress(0);
       setLoading(true);
     }
+    audio.loop = true;
     audio.play().catch(() => { setIsPlaying(false); setLoading(false); });
   }, [currentBeatmap]);
 
@@ -111,6 +128,7 @@ export function AudioPlayerProvider({ children }) {
       setProgress(0);
       setIsPlaying(false);
       setLoading(true);
+      audio.loop = true;
       audio.play().catch(() => { setIsPlaying(false); setLoading(false); });
     }
   }, [currentBeatmap, isPlaying]);
