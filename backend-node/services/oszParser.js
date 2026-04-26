@@ -2,11 +2,37 @@
 //
 // We extract the *minimum* needed to render the same UI as an OSU API
 // beatmapset: title/artist/creator, per-diff CS/AR/OD/HP/BPM/length, and
-// the set-level audio + background filenames. We deliberately do NOT try
-// to compute star ratings server-side — that requires a difficulty
-// calculator (rosu-pp) which is overkill for an MVP. Stars are 0 for
-// imports and the UI shows them as "local".
+// the set-level audio + background filenames. Star ratings are computed
+// per-diff via rosu-pp (WASM) so imported maps show real difficulty
+// colors in DiffList instead of placeholder 0.00 stars.
 const AdmZip = require('adm-zip');
+let rosu = null;
+try {
+  rosu = require('rosu-pp-js');
+} catch (err) {
+  // Best-effort: if the WASM bindings fail to load (rare, env issue), we
+  // still parse metadata, just without star ratings.
+  console.warn('[oszParser] rosu-pp-js unavailable, star ratings disabled:', err.message);
+}
+
+function computeStars(osuText) {
+  if (!rosu) return { stars: 0, max_combo: 0 };
+  let bm;
+  try {
+    bm = new rosu.Beatmap(osuText);
+    const attrs = new rosu.Difficulty().calculate(bm);
+    return {
+      stars: Number.isFinite(attrs.stars) ? attrs.stars : 0,
+      max_combo: Number.isFinite(attrs.maxCombo) ? attrs.maxCombo : 0,
+    };
+  } catch (err) {
+    return { stars: 0, max_combo: 0 };
+  } finally {
+    if (bm && typeof bm.free === 'function') {
+      try { bm.free(); } catch (_) {}
+    }
+  }
+}
 
 function parseSections(text) {
   const sections = {};
@@ -126,7 +152,11 @@ function parseOszBuffer(buffer) {
   for (const e of osuEntries) {
     try {
       const text = e.getData().toString('utf8');
-      diffs.push(parseOsuMeta(text));
+      const meta = parseOsuMeta(text);
+      const { stars, max_combo } = computeStars(text);
+      meta.difficulty_rating = stars;
+      meta.max_combo = max_combo || meta.hit_count;
+      diffs.push(meta);
     } catch (_) {
       // skip broken diff
     }

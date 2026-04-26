@@ -138,6 +138,88 @@ router.post('/', upload.single('osz'), async (req, res) => {
     return res.status(400).json({ error: `failed to parse .osz: ${err.message}` });
   }
 
+  return persistOsz({
+    res,
+    cid,
+    buffer: req.file.buffer,
+    parsed,
+    originalFilename: req.file.originalname,
+    sizeBytes: req.file.size,
+  });
+});
+
+// Server-side import from a public osu! beatmapset id. We download the
+// .osz from the NeriNyan mirror, parse + store it in GridFS like a
+// normal upload. Lets the Library "Télécharger" button add a map to the
+// user's Solo collection in one click without the browser re-uploading
+// 50+ MB of data.
+const NERINYAN_BASE = 'https://api.nerinyan.moe/d/';
+const MAX_OSZ_BYTES = 200 * 1024 * 1024;
+
+router.post('/from-osu', express.json(), async (req, res) => {
+  const cid = getClientId(req);
+  if (!cid) return res.status(400).json({ error: 'X-Client-Id header required' });
+
+  const setId = String(req.body?.set_id ?? '').trim();
+  if (!/^[0-9]+$/.test(setId)) {
+    return res.status(400).json({ error: 'valid set_id required' });
+  }
+
+  // Skip if the user already has this set imported (avoids duplicates and
+  // surfaces the existing doc to the UI right away).
+  try {
+    const db = await getDb();
+    const existing = await db.collection('imports').findOne({
+      owner_id: cid,
+      osu_set_id: parseInt(setId, 10),
+    });
+    if (existing) {
+      return res.status(200).json({ ...sanitizeImport(existing), already_imported: true });
+    }
+  } catch (_) { /* fall through and try the download */ }
+
+  let buffer;
+  try {
+    // `?nv=1` asks the mirror to strip videos — we don't need them and
+    // they bloat the .osz a lot.
+    const upstream = await fetch(`${NERINYAN_BASE}${setId}?nv=1`, {
+      headers: { Accept: 'application/octet-stream' },
+    });
+    if (!upstream.ok) {
+      return res
+        .status(upstream.status === 404 ? 404 : 502)
+        .json({ error: `mirror responded ${upstream.status}` });
+    }
+    const ab = await upstream.arrayBuffer();
+    if (ab.byteLength > MAX_OSZ_BYTES) {
+      return res.status(413).json({ error: '.osz too large (>200MB)' });
+    }
+    buffer = Buffer.from(ab);
+  } catch (err) {
+    console.error('[imports.from-osu fetch]', err);
+    return res.status(502).json({ error: `download failed: ${err.message}` });
+  }
+
+  let parsed;
+  try {
+    parsed = parseOszBuffer(buffer);
+  } catch (err) {
+    return res.status(400).json({ error: `failed to parse .osz: ${err.message}` });
+  }
+
+  return persistOsz({
+    res,
+    cid,
+    buffer,
+    parsed,
+    originalFilename: `osu-${setId}.osz`,
+    sizeBytes: buffer.length,
+  });
+});
+
+// Shared persistence path used by both POST / (file upload) and
+// POST /from-osu (server-side download).
+async function persistOsz({ res, cid, buffer, parsed, originalFilename, sizeBytes }) {
   try {
     const db = await getDb();
     const oszBucket = await getOszBucket();
@@ -151,7 +233,7 @@ router.post('/', upload.single('osz'), async (req, res) => {
       });
       stream.on('finish', () => resolve(stream.id));
       stream.on('error', reject);
-      stream.end(req.file.buffer);
+      stream.end(buffer);
     });
 
     let coverFileId = null;
@@ -169,49 +251,41 @@ router.post('/', upload.single('osz'), async (req, res) => {
 
     const baseUrl = `/api/imports/${id}`;
 
-    // Build a difficulty list shaped like the OSU API's so existing UI
-    // components (SongDetail, ProfileCard, etc) work unchanged.
     const difficulties = parsed.diffs.map((d, i) => ({
       id: `${id}-${i}`,
       beatmap_id: d.beatmap_id || null,
       beatmap_set_id: d.beatmap_set_id || null,
       version: d.version,
       mode: d.mode,
-      difficulty_rating: 0,
+      difficulty_rating: d.difficulty_rating || 0,
       cs: d.cs,
       ar: d.ar,
       od: d.od,
       hp: d.hp,
       bpm: d.bpm,
       length_seconds: d.length_seconds,
-      max_combo: d.hit_count,
+      max_combo: d.max_combo || d.hit_count,
       hit_count: d.hit_count,
     }));
-    // Stable diff order: by mode (osu first) then by aggregate difficulty.
     const modeWeight = { osu: 0, taiko: 1, fruits: 2, mania: 3 };
     difficulties.sort((a, b) => {
       const m = (modeWeight[a.mode] || 0) - (modeWeight[b.mode] || 0);
       if (m !== 0) return m;
-      return (a.cs + a.ar + a.od + a.hp) - (b.cs + b.ar + b.od + b.hp);
+      return (a.difficulty_rating || 0) - (b.difficulty_rating || 0);
     });
 
-    // Use the first parsed diff's BeatmapSetID as the canonical osu! set id
-    // (same across all .osu files of a set). Falls back to null for fully
-    // custom/local maps that don't carry an osu! id.
     const osuSetId = parsed.diffs.find((d) => d.beatmap_set_id)?.beatmap_set_id || null;
     const lengthSeconds = Math.max(...difficulties.map((d) => d.length_seconds || 0), 0);
 
     const doc = {
       id,
       owner_id: cid,
-      original_filename: req.file.originalname,
+      original_filename: originalFilename,
       title: parsed.set.title,
       title_unicode: parsed.set.title_unicode,
       artist: parsed.set.artist,
       artist_unicode: parsed.set.artist_unicode,
       creator: parsed.set.creator,
-      // Alias used by SongDetail (`beatmap.mapper`) and the rest of the
-      // OSU-API-shaped UI. Keep `creator` too for backward compat.
       mapper: parsed.set.creator,
       source: parsed.set.source,
       tags: typeof parsed.set.tags === 'string'
@@ -224,33 +298,26 @@ router.post('/', upload.single('osz'), async (req, res) => {
       cover_card_url: coverFileId ? `${baseUrl}/cover` : null,
       cover_url: coverFileId ? `${baseUrl}/cover` : null,
       difficulties,
-      // The chosen "main" difficulty fields (set-level), useful for the
-      // detail panel's compact stats line.
-      difficulty: 0,
+      difficulty: difficulties.reduce((m, d) => Math.max(m, d.difficulty_rating || 0), 0),
       bpm: difficulties[0]?.bpm || null,
       length_seconds: lengthSeconds,
-      // Alias used by SongCard / SongDetail (`beatmap.duration_sec`).
       duration_sec: lengthSeconds,
-      // Official osu! beatmap_set_id extracted from the .osu metadata.
-      // Used by SongDetail to build the external osu.ppy.sh link and to
-      // hand the OFFICIAL leaderboard for this set to the Leaderboard
-      // component. May be null for custom/personal maps.
       osu_set_id: osuSetId,
       osz_file_id: oszFileId,
       cover_file_id: coverFileId,
       cover_content_type: parsed.coverContentType,
-      osz_size_bytes: req.file.size,
+      osz_size_bytes: sizeBytes,
       is_local_import: true,
       created_at: new Date(),
     };
 
     await db.collection('imports').insertOne(doc);
-    res.status(201).json(sanitizeImport(doc));
+    return res.status(201).json(sanitizeImport(doc));
   } catch (err) {
-    console.error('[imports upload]', err);
-    res.status(500).json({ error: `upload failed: ${err.message}` });
+    console.error('[imports persist]', err);
+    return res.status(500).json({ error: `upload failed: ${err.message}` });
   }
-});
+}
 
 router.delete('/:id', async (req, res) => {
   const cid = getClientId(req);

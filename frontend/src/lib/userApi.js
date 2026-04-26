@@ -48,6 +48,15 @@ export async function deleteImport(id) {
   await apiClient.delete(`/imports/${encodeURIComponent(id)}`);
 }
 
+// Server-side import from a public osu! beatmapset id. Triggers the
+// backend to download the .osz from the NeriNyan mirror, parse it, and
+// store it in this user's GridFS. Returns the new import doc (or an
+// existing one with `already_imported: true`).
+export async function importFromOsu(setId) {
+  const { data } = await apiClient.post("/imports/from-osu", { set_id: String(setId) });
+  return absolutizeCoverUrls(data);
+}
+
 // Build the absolute URL we hand to the engine for downloading a local
 // import's .osz blob. Used by play.html via ?local=1 mode.
 export function importFileUrl(id) {

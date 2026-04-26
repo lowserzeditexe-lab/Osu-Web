@@ -6,6 +6,7 @@ require('dotenv').config();
 const beatmapsRouter = require('./routes/beatmaps');
 const { router: usersRouter } = require('./routes/users');
 const importsRouter = require('./routes/imports');
+const scoresRouter = require('./routes/scores');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '8001', 10);
@@ -40,6 +41,7 @@ api.get('/menu', async (req, res) => {
 api.use('/beatmaps', beatmapsRouter);
 api.use('/users', usersRouter);
 api.use('/imports', importsRouter);
+api.use('/scores', scoresRouter);
 
 app.use('/api', api);
 

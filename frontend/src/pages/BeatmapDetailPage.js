@@ -7,7 +7,7 @@ import BeatmapBackdrop from "@/components/BeatmapBackdrop";
 import { fetchBeatmap } from "@/lib/api";
 import { formatCount, formatDuration, difficultyColor, difficultyLabel } from "@/lib/format";
 import { useAudioPlayer } from "@/contexts/AudioPlayerContext";
-import { useSavedBeatmaps } from "@/contexts/SavedBeatmapsContext";
+import { useImports } from "@/contexts/ImportsContext";
 
 const MODE_LABEL = { osu: "osu!std", taiko: "Taiko", fruits: "Catch", mania: "Mania" };
 
@@ -51,7 +51,7 @@ export default function BeatmapDetailPage() {
   const { id } = useParams();
   const [state, setState] = useState({ status: "loading", data: null, error: null });
   const { currentBeatmap, isPlaying, loading: audioLoading, toggle } = useAudioPlayer();
-  const { isSaved, toggle: toggleSave } = useSavedBeatmaps();
+  const { isOsuSetImported, importOsuSet, osuImportState } = useImports();
 
   useEffect(() => {
     let cancelled = false;
@@ -78,7 +78,19 @@ export default function BeatmapDetailPage() {
 
   const isCurrentTrack = currentBeatmap?.id === bm?.id;
   const isCurrentlyPlaying = isCurrentTrack && isPlaying;
-  const downloaded = bm ? isSaved(bm.id) : false;
+  const downloaded = bm ? isOsuSetImported(bm.id) : false;
+  const downloadState = bm ? osuImportState[String(bm.id)] : null;
+  const downloading = downloadState?.status === "fetching";
+  const downloadError = downloadState?.status === "error" ? downloadState.error : null;
+
+  async function handleDownload() {
+    if (!bm || downloading || downloaded) return;
+    try {
+      await importOsuSet(bm.id);
+    } catch (_) {
+      // Error surface handled via osuImportState.
+    }
+  }
 
   const sortedDiffs = bm?.difficulties
     ? [...bm.difficulties].sort((a, b) => {
@@ -205,20 +217,48 @@ export default function BeatmapDetailPage() {
 
                 {/* Actions */}
                 <div className="mt-8 flex items-center gap-3 flex-wrap">
-                  {/* Download button */}
+                  {/* Download button — server-side import to user's Solo. */}
                   <button
                     type="button"
-                    onClick={() => toggleSave(bm)}
-                    className="inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-[12px] uppercase tracking-[0.22em] font-semibold transition-all hover:scale-105 active:scale-95"
+                    onClick={handleDownload}
+                    disabled={downloading || downloaded}
+                    data-testid="beatmap-download-button"
+                    className="inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-[12px] uppercase tracking-[0.22em] font-semibold transition-all hover:scale-105 active:scale-95 disabled:scale-100 disabled:cursor-not-allowed"
                     style={
                       downloaded
                         ? { borderColor: `${color}66`, background: `${color}22`, color }
                         : { borderColor: "rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.75)" }
                     }
+                    title={
+                      downloaded
+                        ? "Déjà dans ta collection — va dans Solo pour la jouer"
+                        : downloading
+                        ? "Téléchargement en cours…"
+                        : "Télécharger et ajouter à ta collection Solo"
+                    }
                   >
-                    {downloaded ? <CheckCircle2 size={14} /> : <Download size={14} />}
-                    {downloaded ? "Téléchargé" : "Télécharger"}
+                    {downloading ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : downloaded ? (
+                      <CheckCircle2 size={14} />
+                    ) : (
+                      <Download size={14} />
+                    )}
+                    {downloading
+                      ? "Téléchargement…"
+                      : downloaded
+                      ? "Téléchargé"
+                      : "Télécharger"}
                   </button>
+
+                  {downloadError && (
+                    <span
+                      data-testid="beatmap-download-error"
+                      className="text-[11px] text-red-300/85 max-w-[260px] leading-tight"
+                    >
+                      Échec : {downloadError}
+                    </span>
+                  )}
 
                   {/* Link to osu.ppy.sh */}
                   <a

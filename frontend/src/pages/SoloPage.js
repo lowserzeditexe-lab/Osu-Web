@@ -296,7 +296,6 @@ export default function SoloPage() {
               selectedDiff={selectedDiff}
               onSelect={handleSelect}
               onDiffChange={setSelectedDiff}
-              onPickFiles={handleFiles}
               accent={color}
             />
           </div>
