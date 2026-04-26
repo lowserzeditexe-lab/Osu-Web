@@ -42,7 +42,11 @@ const MAX_OSZ_BYTES = 200 * 1024 * 1024; // 200 MB
 // ── IndexedDB helpers ───────────────────────────────────────────────────────
 const DB_NAME = "osu_audio_cache";
 const STORE = "audio_blobs";
-const DB_VERSION = 1;
+// v2 — entries are now `{ blob, previewTimeMs }` (v1 stored raw Blob only,
+// which forced previewTimeMs=0 on cache hits and made the song loop from 0
+// instead of the real PreviewTime). Bumping the version drops the v1 store
+// so cached maps re-download once with the new format.
+const DB_VERSION = 2;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -50,7 +54,10 @@ function openDB() {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      // Purge any pre-existing v1 store so legacy raw-Blob entries don't
+      // leak into v2 reads. Re-create empty.
+      if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE);
+      db.createObjectStore(STORE);
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -256,6 +263,10 @@ export async function fetchBeatmapAudio(setId, opts = {}) {
     const url = URL.createObjectURL(audioBlob);
     const result = { url, previewTimeMs };
     urlCache.set(key, result);
+    // eslint-disable-next-line no-console
+    console.debug(
+      `[beatmapAudio] set=${key} audio="${audioFilename}" PreviewTime=${previewTimeMs}ms`
+    );
     return result;
   })();
 

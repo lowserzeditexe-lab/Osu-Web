@@ -242,15 +242,17 @@ export function AudioPlayerProvider({ children }) {
     // Stash the PreviewTime (in seconds) BEFORE load() so the metadata
     // handler picks it up on first fire. Treat anything ≤ 0 as "absent".
     const ptMs = Number(opts.previewTimeMs);
-    previewStartSecRef.current =
+    const previewSec =
       Number.isFinite(ptMs) && ptMs > 0 ? ptMs / 1000 : null;
+    previewStartSecRef.current = previewSec;
     // Native loop is OFF — onEnded handles the wrap so we restart from
     // PreviewTime instead of from 0.
     audio.loop = false;
 
     const sameBeatmap =
       beatmap && currentBeatmap && currentBeatmap.id === beatmap.id;
-    if (!sameBeatmap || audio.src !== audioUrl) {
+    const needsReload = !sameBeatmap || audio.src !== audioUrl;
+    if (needsReload) {
       audio.pause();
       audio.src = audioUrl;
       audio.load();
@@ -258,7 +260,48 @@ export function AudioPlayerProvider({ children }) {
       setProgress(0);
       setLoading(true);
     }
-    audio.play().catch(() => { setIsPlaying(false); setLoading(false); });
+
+    // ── Defer play() until metadata is known AND currentTime has been
+    // seeked to PreviewTime. Calling play() before the seek meant the
+    // browser would start producing audio from 0 for a few hundred ms
+    // before the seek landed — that's why the user heard the song start
+    // from the very beginning instead of the drop.
+    const startAtPreview = () => {
+      const a = audioRef.current;
+      if (!a) return;
+      // Re-check the mode in case the user moved on to another map.
+      if (modeRef.current !== "last30") return;
+      const d = a.duration;
+      let target = 0;
+      if (d && isFinite(d)) {
+        if (previewSec != null && previewSec > 0 && previewSec < d) {
+          target = previewSec;
+        }
+        last30StartRef.current = target;
+      }
+      try { a.currentTime = target; } catch (_) { /* noop */ }
+      const p = a.play();
+      if (p && typeof p.catch === "function") {
+        p.catch(() => { setIsPlaying(false); setLoading(false); });
+      }
+    };
+
+    if (needsReload) {
+      // Already loading — wait for metadata once, then seek + play.
+      const onMeta = () => {
+        audio.removeEventListener("loadedmetadata", onMeta);
+        startAtPreview();
+      };
+      // If metadata is somehow already ready (cached blob URL), fire now.
+      if (audio.readyState >= 1 /* HAVE_METADATA */) {
+        startAtPreview();
+      } else {
+        audio.addEventListener("loadedmetadata", onMeta);
+      }
+    } else {
+      // Same src already loaded — seek + play immediately.
+      startAtPreview();
+    }
   }, [currentBeatmap]);
 
   const pause = useCallback(() => {
