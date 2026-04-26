@@ -28,6 +28,58 @@ backend:
           retournent tous 200.
 
 frontend:
+  - task: "Musique du beatmap sélectionné — full track + loop sur les 30 dernières secondes (Solo)"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/lib/beatmapAudio.js, /app/frontend/src/contexts/AudioPlayerContext.js, /app/frontend/src/pages/SoloPage.js, /app/frontend/package.json (jszip)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Remplacement du preview ~10s par la vraie musique du beatmap, en
+          boucle sur les 30 dernières secondes (style menu osu! réel).
+          1) `yarn add jszip` — pour unzip les .osz côté React.
+          2) `src/lib/beatmapAudio.js` :
+             • `fetchBeatmapAudio(setId)` télécharge le .osz depuis NeriNyan
+               (`api.nerinyan.moe/d/{id}`, CORS-friendly), parse le `.osu`
+               pour récupérer `[General].AudioFilename`, extrait l'audio,
+               retourne un blob URL avec MIME approprié.
+             • Cache à 2 niveaux : Map mémoire + IndexedDB persistante (la
+               2ème sélection est instantanée, même après reload).
+             • Coalescing des fetches concurrents.
+             • Hard cap 60 MB pour éviter les marathons monstrueux.
+             • Tracking de progression via `onProgress(0..1)`.
+          3) `AudioPlayerContext.js` — nouveau mode "last30" :
+             • `playLast30(audioUrl, beatmap)` exposé via le context.
+             • `modeRef` (ref) pour suivre 'preview' vs 'last30'.
+             • Sur `loadedmetadata` en last30 → seek à `duration - 30`.
+             • `audio.loop = false` (loop manuel via onEnded → reseek à
+               duration-30 puis play).
+             • `timeupdate` enforce la fenêtre : si currentTime tombe avant
+               duration-30, on yank back. Et progress reflète 0→1 sur la
+               fenêtre 30s, pas sur le morceau entier.
+             • Mode "preview" inchangé pour Library/BeatmapDetail/MiniPlayer.
+          4) `SoloPage.js` :
+             • Utilise `fetchBeatmapAudio(setId)` à chaque sélection.
+             • Pendant le DL (1ère fois, 3-15s), joue le preview ~10s comme
+               bridge audio (sauf si déjà cached → skip pour pas faire pop
+               le preview avant le full track).
+             • `fetchTokenRef` invalide les fetches obsolètes (clic rapide
+               sur une autre map pendant qu'une autre télécharge).
+             • Fallback gracieux si fetch échoue (offline, .osz trop gros,
+               AudioFilename absent) → reste sur le preview.
+          Tests in-browser sur set 320118 ("No title" / Reol, 1:31) :
+            • Download NeriNyan : `https://api.nerinyan.moe/d/320118` →
+              redirect 302 vers `dl.nerinyan.moe/v2/d/320118`.
+            • À t=25s : srcType=BLOB ✅, duration=91.45s ✅, currentTime=
+              82.03s (dans [61.45, 91.45]) ✅.
+            • À t=40s : currentTime=67.1s ✅ (a rebouclé 91→61 puis monté
+              à 67) — verification : InWindow=True.
+            • paused=False, error=None pendant toute la session.
+
   - task: "Lecture auto + boucle du preview audio sur la page Solo"
     implemented: true
     working: true
