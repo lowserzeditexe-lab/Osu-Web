@@ -14,6 +14,11 @@ export function AudioPlayerProvider({ children }) {
     const audio = new Audio();
     audio.preload = "none";
     audio.volume = 0.3;
+    // Like osu! song-select: keep the preview looping forever as long as the
+    // beatmap stays selected. The OSU API preview clip is ~10 s starting at
+    // the beatmap's preview point, so HTMLAudioElement.loop=true seamlessly
+    // restarts it — matching the real game's "selected song music" behaviour.
+    audio.loop = true;
     audioRef.current = audio;
 
     const onEnded = () => { setIsPlaying(false); setProgress(0); };
@@ -97,8 +102,12 @@ export function AudioPlayerProvider({ children }) {
   const stop = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
+    // Just pause + reset — we DON'T clear `audio.src` here. Setting src=""
+    // would resolve to the document URL (browser quirk) and put the element
+    // into an error/loading state, which makes the next `play()` flaky.
+    // The src will be overwritten by the next `play(beatmap)` call anyway.
     audio.pause();
-    audio.src = "";
+    try { audio.currentTime = 0; } catch (_) { /* may throw if no source */ }
     setCurrentBeatmap(null);
     setIsPlaying(false);
     setProgress(0);

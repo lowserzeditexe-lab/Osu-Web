@@ -26,7 +26,7 @@ export default function SoloPage() {
   });
   const restoredOnceRef = useRef(false);
 
-  const { toggle } = useAudioPlayer();
+  const { play, stop } = useAudioPlayer();
 
   const handleSelect = useCallback(
     (beatmap, opts = {}) => {
@@ -55,12 +55,18 @@ export default function SoloPage() {
           JSON.stringify({ id: beatmap.id, diffId: chosenDiff?.id || null })
         );
       } catch (_) { /* private mode etc. */ }
-      // Don't auto-toggle audio when programmatically restoring on mount.
-      if (beatmap.audio_url && !opts.silent) {
-        toggle(beatmap);
+      // ── Auto-play the preview audio of the selected beatmap (osu!-style):
+      // arriving on Solo with a saved/explicit beatmap, clicking a song card,
+      // or auto-selecting items[0] all fire this. We use `play()` (not
+      // `toggle()`) so the music ALWAYS resumes on selection — the
+      // AudioPlayerContext loops the preview forever. Browsers may block
+      // autoplay until the user has interacted with the site, but since users
+      // reach /solo by clicking a menu card, the gesture is already granted.
+      if (beatmap.audio_url) {
+        play(beatmap);
       }
     },
-    [toggle]
+    [play]
   );
 
   // Pre-load beatmap from ?beatmap= param (coming from detail page) or from
@@ -92,12 +98,23 @@ export default function SoloPage() {
 
     fetchBeatmap(idToFetch)
       .then((bm) => {
-        if (bm) handleSelect(bm, { preferredDiffId: savedDiffId, silent: !explicitId });
+        if (bm) handleSelect(bm, { preferredDiffId: savedDiffId });
       })
       .catch(() => {})
       .finally(() => setRestoring(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Stop the menu/preview music when leaving Solo. The user explicitly
+  // asked for the auto-playing preview to stay scoped to the Solo page only,
+  // so we tear down the audio source on unmount (navigation to /, /library,
+  // /play, etc.). The looping preview resumes again when the user comes
+  // back to /solo and a beatmap is restored / selected.
+  useEffect(() => {
+    return () => {
+      stop();
+    };
+  }, [stop]);
 
   const color = selectedDiff
     ? difficultyColor(selectedDiff.difficulty_rating)

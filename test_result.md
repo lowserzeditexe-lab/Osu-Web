@@ -1,26 +1,61 @@
 #====================================================================================================
-# Testing Data — Cursor cleanup (no white halo + Windows cursor hidden)
+# Testing Data — Solo page background music (osu!-style preview loop)
 #====================================================================================================
 
 user_problem_statement: |
-  Modifie le contour blanc curseur ingame et fait en sorte que l'on ne voit pas le curseur "windows"
-  → 1) Curseur in-game identique à celui du menu (pas de halo blanc additif)
-  → 2) Curseur Windows toujours masqué dans tout le jeu (#game-area + canvas)
+  Pour la page Solo, jouer automatiquement la musique (preview audio) du
+  beatmap sélectionné en boucle, comme le vrai jeu en song-select. Démarre
+  dès l'arrivée sur Solo, s'arrête quand on quitte Solo.
+  Précédemment : modification du contour blanc curseur in-game + masquage
+  curseur Windows.
 
 backend:
-  - task: "OSU API credentials (already configured)"
+  - task: "OSU API credentials + node_modules backend-node"
     implemented: true
     working: true
-    file: "/app/backend-node/.env"
+    file: "/app/backend-node/.env, /app/backend-node/node_modules"
     stuck_count: 0
-    priority: "low"
+    priority: "high"
     needs_retesting: false
     status_history:
       - working: true
         agent: "main"
-        comment: "OSU_CLIENT_ID=52326 + OSU_CLIENT_SECRET déjà configurés depuis sessions précédentes."
+        comment: |
+          Fix 502 : (1) `yarn install` dans /app/backend-node (node_modules
+          manquait → 'Cannot find module express') ; (2) recréation du
+          fichier .env avec OSU_CLIENT_ID=52326 + OSU_CLIENT_SECRET (donné
+          par l'utilisateur). /api/health, /api/beatmaps/popular|new|random
+          retournent tous 200.
 
 frontend:
+  - task: "Lecture auto + boucle du preview audio sur la page Solo"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/contexts/AudioPlayerContext.js, /app/frontend/src/pages/SoloPage.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          1) AudioPlayerContext.js — `audio.loop = true` à la création de
+             l'élément Audio. Le preview officiel osu! (~10 s, b.ppy.sh/
+             preview/{id}.mp3, position du preview point) reboucle ainsi
+             indéfiniment, reproduisant le song-select du vrai jeu.
+          2) AudioPlayerContext.js — `stop()` ne fait plus `audio.src = ""`
+             (qui mettait l'élément dans un état dégradé) ; on pause +
+             currentTime=0 uniquement. Le prochain play() réécrit src.
+          3) SoloPage.js — `useAudioPlayer` expose `play` (pas `toggle`).
+             Le restore localStorage appelle `handleSelect(bm)` SANS le flag
+             `silent` ; `handleSelect` appelle `play(bm)` dès qu'audio_url
+             est présent → musique auto à l'arrivée sur Solo.
+          4) SoloPage.js — useEffect cleanup `stop()` au démontage : musique
+             scopée à Solo uniquement (Solo→Library/menu/play arrête,
+             retour sur Solo relance).
+          Tests in-browser : preview en boucle confirmé (loop=true,
+          currentTime cycle 0→10), arrêt en quittant, reprise au retour.
+
   - task: "Curseur in-game sans halo blanc + curseur Windows masqué partout"
     implemented: true
     working: true
