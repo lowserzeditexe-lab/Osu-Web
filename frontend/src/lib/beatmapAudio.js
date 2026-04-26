@@ -1,22 +1,28 @@
 /**
  * beatmapAudio.js — Download an osu! beatmapset .osz from NeriNyan, extract
- * the actual song audio file, and expose it as a blob URL ready to feed to
- * an HTMLAudioElement.
+ * the actual song audio file AND the mapper-defined `PreviewTime`, then
+ * expose both as a ready-to-use blob URL plus the preview offset.
  *
  * This is what powers the "selected beatmap menu music" on the Solo page.
  * Replicates exactly what the WebOsu 2 engine does internally:
  *   1. fetch https://api.nerinyan.moe/d/{beatmapsetId}    (CORS-friendly mirror)
  *   2. unzip the .osz with JSZip
- *   3. parse any .osu inside to find the `[General].AudioFilename` value
- *   4. extract the matching audio entry as a Blob, return a `URL.createObjectURL`
+ *   3. parse any .osu inside to find `[General].AudioFilename` AND
+ *      `[General].PreviewTime` (milliseconds — the mapper-curated "best"
+ *      starting point of the song, e.g. drop/chorus/kiai start)
+ *   4. extract the matching audio entry as a Blob, return
+ *      `{ url: createObjectURL(blob), previewTimeMs }`
+ *
+ * Real osu! plays its song-select preview by SEEKING to `PreviewTime` and
+ * looping `[PreviewTime, end-of-track]`. We do exactly the same — see
+ * `AudioPlayerContext` "last30" mode (kept as an internal name for code
+ * stability; the actual window is now driven by PreviewTime).
  *
  * Caching:
- *   - In-memory `Map<setId, blobUrl>` so the same selection is instant.
- *   - IndexedDB persistent store so reloads / future visits skip the download.
- *
- * The blob URLs are intentionally never revoked here — they live for the
- * lifetime of the tab. If memory pressure becomes an issue we can add an LRU
- * later, but for menu-music use cases this is fine (a few maps per session).
+ *   - In-memory `Map<setId, {url, previewTimeMs}>` so the same selection is
+ *     instant.
+ *   - IndexedDB persistent store (single object per set) so reloads / future
+ *     visits skip the download.
  */
 
 import JSZip from "jszip";
@@ -75,9 +81,10 @@ async function idbPut(key, value) {
 }
 
 // ── In-memory blob URL cache (per-tab) ─────────────────────────────────────
-const urlCache = new Map(); // setId(string) → blobUrl(string)
+// Each entry: { url: string, previewTimeMs: number }
+const urlCache = new Map();
 // Pending fetches so concurrent calls share the same network/decode work.
-const inflight = new Map(); // setId(string) → Promise<string>
+const inflight = new Map(); // setId(string) → Promise<{url, previewTimeMs}>
 
 function pickMime(filename) {
   const ext = (filename.split(".").pop() || "").toLowerCase();
@@ -89,14 +96,37 @@ function pickMime(filename) {
 }
 
 /**
- * Download + extract the song audio for a beatmapset. Resolves with a blob
- * URL pointing at the audio (already cached for subsequent calls).
+ * Parse a `.osu` file's `[General]` section for `AudioFilename` and
+ * `PreviewTime`. We only need these two — both are required for our use
+ * case and they live near the very top of the file, so a regex match on
+ * the first ~10 KB is enough.
+ *
+ * @param {string} osuText
+ * @returns {{ audioFilename: string|null, previewTimeMs: number }}
+ */
+function parseGeneralSection(osuText) {
+  const audioMatch = osuText.match(/^\s*AudioFilename\s*:\s*(.+?)\s*$/im);
+  const previewMatch = osuText.match(/^\s*PreviewTime\s*:\s*(-?\d+)\s*$/im);
+  return {
+    audioFilename: audioMatch ? audioMatch[1].trim() : null,
+    // PreviewTime defaults to -1 in .osu when unset; we normalise to 0 so
+    // the caller can `Math.max(0, …)` without surprises. Real value is
+    // already in milliseconds.
+    previewTimeMs: previewMatch ? Math.max(0, parseInt(previewMatch[1], 10) || 0) : 0,
+  };
+}
+
+/**
+ * Download + extract the song audio for a beatmapset. Resolves with the
+ * full-track blob URL AND the mapper-defined PreviewTime (in milliseconds).
+ *
+ * Subsequent calls for the same setId are instant (memory + IndexedDB).
  *
  * @param {number|string} setId  beatmapset id
  * @param {object} [opts]
  * @param {(progress: number) => void} [opts.onProgress] 0..1 download progress
  * @param {AbortSignal} [opts.signal] optional abort signal
- * @returns {Promise<string>}
+ * @returns {Promise<{ url: string, previewTimeMs: number }>}
  */
 export async function fetchBeatmapAudio(setId, opts = {}) {
   if (!setId) throw new Error("setId required");
@@ -108,12 +138,26 @@ export async function fetchBeatmapAudio(setId, opts = {}) {
   if (inflight.has(key)) return inflight.get(key);
 
   const promise = (async () => {
-    // 3) IndexedDB cache
+    // 3) IndexedDB cache — stores { blob, previewTimeMs }.
+    //    For backwards-compat we also accept legacy entries that were just a
+    //    raw Blob (audio only, no preview time) and treat them as 0.
     const cached = await idbGet(key);
-    if (cached && cached instanceof Blob && cached.size > 0) {
-      const url = URL.createObjectURL(cached);
-      urlCache.set(key, url);
-      return url;
+    if (cached) {
+      let blob = null;
+      let previewTimeMs = 0;
+      if (cached instanceof Blob && cached.size > 0) {
+        // legacy entry — audio only
+        blob = cached;
+      } else if (cached && cached.blob instanceof Blob && cached.blob.size > 0) {
+        blob = cached.blob;
+        previewTimeMs = Number(cached.previewTimeMs) || 0;
+      }
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const result = { url, previewTimeMs };
+        urlCache.set(key, result);
+        return result;
+      }
     }
 
     // 4) network — download .osz with progress
@@ -165,16 +209,22 @@ export async function fetchBeatmapAudio(setId, opts = {}) {
     // 5) unzip
     const zip = await JSZip.loadAsync(oszBlob);
 
-    // 6) find AudioFilename from any .osu file (they all share the same audio)
+    // 6) Find AudioFilename + PreviewTime by parsing any .osu file. All diffs
+    //    of a beatmapset share the same audio file, but `PreviewTime` is
+    //    technically per-difficulty. We pick the FIRST .osu we encounter —
+    //    in practice mappers keep PreviewTime identical across diffs (the
+    //    osu! editor writes the same value when you set "Preview point").
     let audioFilename = null;
+    let previewTimeMs = 0;
     const osuEntries = Object.keys(zip.files).filter((n) =>
       n.toLowerCase().endsWith(".osu")
     );
     for (const name of osuEntries) {
       const content = await zip.files[name].async("text");
-      const m = content.match(/^\s*AudioFilename\s*:\s*(.+?)\s*$/im);
-      if (m && m[1]) {
-        audioFilename = m[1].trim();
+      const parsed = parseGeneralSection(content);
+      if (parsed.audioFilename) {
+        audioFilename = parsed.audioFilename;
+        previewTimeMs = parsed.previewTimeMs;
         break;
       }
     }
@@ -196,11 +246,12 @@ export async function fetchBeatmapAudio(setId, opts = {}) {
     let audioBlob = await zip.files[audioName].async("blob");
     audioBlob = new Blob([audioBlob], { type: pickMime(audioFilename) });
 
-    // 9) persist & return URL
-    await idbPut(key, audioBlob);
+    // 9) persist (blob + previewTimeMs together) & return
+    await idbPut(key, { blob: audioBlob, previewTimeMs });
     const url = URL.createObjectURL(audioBlob);
-    urlCache.set(key, url);
-    return url;
+    const result = { url, previewTimeMs };
+    urlCache.set(key, result);
+    return result;
   })();
 
   inflight.set(key, promise);
@@ -218,6 +269,6 @@ export function hasCachedBeatmapAudio(setId) {
 
 /** Best-effort cleanup — only useful for tests. */
 export function _clearAudioCache() {
-  urlCache.forEach((url) => URL.revokeObjectURL(url));
+  urlCache.forEach((entry) => URL.revokeObjectURL(entry.url));
   urlCache.clear();
 }

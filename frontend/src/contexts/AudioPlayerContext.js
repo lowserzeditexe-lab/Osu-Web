@@ -9,9 +9,11 @@ import React, {
 
 const AudioPlayerContext = createContext(null);
 
-// Length (in seconds) of the tail-loop window for full-track playback on the
-// Solo page. The audio loops over [duration - LOOP_WINDOW_SECONDS, duration]
-// — i.e. only the last N seconds of the song play, on repeat. Tweak here.
+// Fallback length (in seconds) for the tail-loop window when no
+// mapper-defined PreviewTime is available. Real osu! always loops from
+// `[General].PreviewTime → end-of-track`, but if the .osu file ships
+// with `PreviewTime: -1` (rare but possible) we fall back to "last N
+// seconds of the track" using this constant.
 const LOOP_WINDOW_SECONDS = 45;
 
 /**
@@ -26,10 +28,14 @@ const LOOP_WINDOW_SECONDS = 45;
  *
  *  • "last30" (Solo song-select):
  *      audio.src is a *blob URL* of the FULL beatmap audio (extracted from
- *      the .osz via `lib/beatmapAudio.js`). On `loadedmetadata` we seek to
- *      `duration - 30` and from there `ended` always brings us back to the
- *      same offset → the listener hears the climax / outro of the actual
- *      song looping, just like osu!'s in-game menu music behaviour.
+ *      the .osz via `lib/beatmapAudio.js`). Playback mimics real osu!
+ *      song-select: we seek to the mapper-defined `[General].PreviewTime`
+ *      (kiai/drop/chorus, the "best" point of the song) and loop
+ *      `[PreviewTime, end-of-track]`. If no PreviewTime is provided we
+ *      fall back to `[duration - LOOP_WINDOW_SECONDS, end]` so the user
+ *      still hears the climax of the song.
+ *      The mode name "last30" is kept as an internal identifier for code
+ *      stability — the actual window length now varies per beatmap.
  */
 export function AudioPlayerProvider({ children }) {
   const [currentBeatmap, setCurrentBeatmap] = useState(null);
@@ -42,8 +48,15 @@ export function AudioPlayerProvider({ children }) {
   // the audio event handlers below are bound once at mount and need to read
   // the latest value without forcing a remount of every listener.
   const modeRef = useRef("preview"); // "preview" | "last30"
-  // For "last30" mode: the timestamp the loop should restart from (in seconds).
+  // For "last30" mode: the timestamp the loop should restart from (in
+  // seconds). Computed once metadata is loaded as either
+  //   - the mapper-defined PreviewTime (if provided + valid),
+  //   - OR `duration - LOOP_WINDOW_SECONDS` as a fallback.
   const last30StartRef = useRef(0);
+  // Mapper-defined PreviewTime in seconds. 0 means "unset / fallback".
+  // Set by `playLast30` from the {previewTimeMs} returned by
+  // `lib/beatmapAudio.js`.
+  const previewStartRef = useRef(0);
 
   useEffect(() => {
     const audio = new Audio();
@@ -58,9 +71,21 @@ export function AudioPlayerProvider({ children }) {
     // ── Computes where a "last30" loop should restart from. We re-read the
     // audio.duration each time because metadata may have changed since the
     // ref was set (e.g. after a src swap to a longer track).
+    //
+    // Priority:
+    //   1. Mapper-defined PreviewTime (from .osu `[General].PreviewTime`)
+    //      — only used if it's strictly inside the track, with at least
+    //      ~1 second of music after it (otherwise the loop would be too
+    //      short / unmusical).
+    //   2. Fallback: `duration - LOOP_WINDOW_SECONDS` so we still hear the
+    //      song's climax/outro when no PreviewTime is provided.
     const computeLast30Start = () => {
       const d = audio.duration;
       if (!d || !isFinite(d)) return 0;
+      const previewSec = previewStartRef.current;
+      if (previewSec > 0 && previewSec < d - 1) {
+        return previewSec;
+      }
       return Math.max(0, d - LOOP_WINDOW_SECONDS);
     };
 
@@ -193,25 +218,36 @@ export function AudioPlayerProvider({ children }) {
     audio.play().catch(() => { setIsPlaying(false); setLoading(false); });
   }, [currentBeatmap]);
 
-  // ── last30 mode: full beatmap audio, looped over its last 30 s ────────────
+  // ── last30 mode: full beatmap audio, looped over [PreviewTime, end] ─────
   /**
    * Play a *full track* audio (typically a blob URL produced by
-   * `lib/beatmapAudio.js`) and loop it on its last 30 seconds. Use this for
-   * the Solo page background music.
+   * `lib/beatmapAudio.js`) and loop it the way real osu! does in
+   * song-select: starting from the mapper-defined PreviewTime (the
+   * "interesting" point of the song — drop / kiai / chorus).
+   *
+   * The loop window is `[startSec, duration]`. If `previewTimeMs` is missing
+   * or invalid (e.g. .osu had `PreviewTime: -1`), we fall back to
+   * `[duration - LOOP_WINDOW_SECONDS, duration]`.
    *
    * @param {string} audioUrl  blob URL (or any seekable mp3/ogg) for the
    *                           full beatmap audio file.
    * @param {object} [beatmap] beatmap metadata to expose in `currentBeatmap`.
+   * @param {object} [opts]
+   * @param {number} [opts.previewTimeMs] mapper-defined preview point in ms.
    */
-  const playLast30 = useCallback((audioUrl, beatmap) => {
+  const playLast30 = useCallback((audioUrl, beatmap, opts = {}) => {
     if (!audioUrl) return;
     const audio = audioRef.current;
     if (!audio) return;
     // Always switch into last30 mode FIRST so onLoadedMetadata can act.
     modeRef.current = "last30";
     last30StartRef.current = 0;
+    // Stash the mapper-defined preview point (in seconds) for the helpers
+    // below. 0 means "unset → use the fallback last-N-seconds window".
+    const ptMs = Number(opts.previewTimeMs) || 0;
+    previewStartRef.current = ptMs > 0 ? ptMs / 1000 : 0;
     // Native loop is OFF — onEnded handles the wrap so we stay inside the
-    // 30-second window instead of restarting from 0.
+    // [PreviewTime, end] window instead of restarting from 0.
     audio.loop = false;
 
     const sameBeatmap =
@@ -265,6 +301,8 @@ export function AudioPlayerProvider({ children }) {
     audio.pause();
     try { audio.currentTime = 0; } catch (_) { /* may throw if no source */ }
     modeRef.current = "preview";
+    previewStartRef.current = 0;
+    last30StartRef.current = 0;
     setCurrentBeatmap(null);
     setIsPlaying(false);
     setProgress(0);

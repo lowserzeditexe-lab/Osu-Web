@@ -28,6 +28,41 @@ backend:
           retournent tous 200.
 
 frontend:
+      - working: true
+        agent: "main"
+        comment: |
+          Switch du loop "last 30/45 sec" vers le comportement osu!-réel :
+          loop sur `[PreviewTime, end-of-track]` où `PreviewTime` vient
+          du `[General].PreviewTime` du fichier `.osu` (ms). C'est le
+          moment "intéressant" choisi par le mapper (drop / kiai / chorus).
+
+          1) `lib/beatmapAudio.js` :
+             • `parseGeneralSection()` extrait `AudioFilename` ET `PreviewTime`
+               via regex sur le .osu (premier diff trouvé, tous les diffs
+               d'un set partagent la même valeur en pratique).
+             • `fetchBeatmapAudio()` retourne désormais `{ url, previewTimeMs }`
+               au lieu d'une simple URL.
+             • IDB stocke `{ blob, previewTimeMs }` (avec backwards-compat
+               pour les anciennes entrées Blob seul → previewTimeMs=0).
+
+          2) `AudioPlayerContext.js` :
+             • Nouvelle ref `previewStartRef` pour le PreviewTime en secondes.
+             • `computeLast30Start()` priorise PreviewTime si valide
+               (>0 et <duration-1s) ; sinon fallback `duration - 45s`.
+             • `playLast30(url, beatmap, { previewTimeMs })` accepte le
+               PreviewTime en option.
+             • `LOOP_WINDOW_SECONDS = 45` reste comme fallback de sécurité.
+
+          3) `SoloPage.js` : récupère `{ url, previewTimeMs }` et le passe à
+             `playLast30()`.
+
+          Vérifié in-browser sur set 320118 (Reol — No title, mappé par VINXIS) :
+            • IDB après fetch : `{ blob, previewTimeMs: 50097 }` ✅
+            • duration: 91.45s, fenêtre théorique [50.097, 91.45]
+            • Échantillons currentTime : 67.72→72.73→77.74→82.76→87.69
+              puis WRAP → 51.15 → 56.20 ← reboucle à PreviewTime, pas à 0.
+            • Comportement strictement identique à osu! song-select.
+
   - task: "Musique du beatmap sélectionné — full track + loop sur les 30 dernières secondes (Solo)"
     implemented: true
     working: true

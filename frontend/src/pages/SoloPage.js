@@ -96,11 +96,13 @@ export default function SoloPage() {
           if (fetchTokenRef.current === myToken) setAudioFetchProgress(p);
         },
       })
-        .then((blobUrl) => {
+        .then(({ url, previewTimeMs }) => {
           // Stale fetch (user already moved on)? Discard.
           if (fetchTokenRef.current !== myToken) return;
           setAudioFetchProgress(null);
-          playLast30(blobUrl, beatmap);
+          // Pass the mapper-defined PreviewTime so the AudioPlayer can loop
+          // [PreviewTime, end-of-track] just like real osu! song-select.
+          playLast30(url, beatmap, { previewTimeMs });
         })
         .catch((err) => {
           if (fetchTokenRef.current !== myToken) return;
