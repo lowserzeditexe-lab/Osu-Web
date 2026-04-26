@@ -21,7 +21,23 @@ export function AudioPlayerProvider({ children }) {
     audio.loop = true;
     audioRef.current = audio;
 
-    const onEnded = () => { setIsPlaying(false); setProgress(0); };
+    // Bulletproof loop: even though `audio.loop = true` should be enough,
+    // some browsers / mobile Safari versions still fire `ended` near the
+    // end of the clip. We catch it and seek back to 0 + replay manually so
+    // the preview never stops on its own. A no-op when loop=true works
+    // natively (the event simply doesn't fire).
+    const onEnded = () => {
+      try {
+        audio.currentTime = 0;
+        const p = audio.play();
+        if (p && typeof p.catch === "function") {
+          p.catch(() => { setIsPlaying(false); setLoading(false); });
+        }
+      } catch (_) {
+        setIsPlaying(false);
+        setProgress(0);
+      }
+    };
     const onTimeUpdate = () => {
       if (audio.duration && isFinite(audio.duration)) {
         setProgress(audio.currentTime / audio.duration);
