@@ -164,6 +164,16 @@ DifficultyMultiplier = `floor((CS + HP + OD) / 38) + 2` clampé à [2..6].
   `fallingObjects`, `showDeathMenuNow`) pour qu'une 2ème mort déclenche
   proprement la cinématique.
 
+### 26 Feb 2026 — Solo menu music = "real osu!" PreviewTime loop
+- `frontend/src/lib/beatmapAudio.js` parse `[General].PreviewTime` du `.osu`
+  dans le `.osz` et retourne `{ url, previewTimeMs }` (cache mémoire + IDB).
+- `frontend/src/contexts/AudioPlayerContext.js` : nouveau `previewStartSecRef`,
+  `playLast30(url, beatmap, { previewTimeMs })` règle le loop sur
+  `[PreviewTime, end-of-track]` exactement comme la song-select osu! réelle.
+  Fallback sur les 45 dernières secondes si `PreviewTime ≤ 0`.
+- `frontend/src/pages/SoloPage.js` passe le `previewTimeMs` extrait à
+  `playLast30`. Bug `previewStartRef.current` (undefined) corrigé dans `stop()`.
+
 ## Backlog (P2 restant)
 - Hit sounds (whistle / finish / clap par addition set personnalisé).
 - ColorOverride par map (couleurs de combo personnalisées).

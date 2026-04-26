@@ -49,14 +49,13 @@ export function AudioPlayerProvider({ children }) {
   // the latest value without forcing a remount of every listener.
   const modeRef = useRef("preview"); // "preview" | "last30"
   // For "last30" mode: the timestamp the loop should restart from (in
-  // seconds). Computed once metadata is loaded as either
-  //   - the mapper-defined PreviewTime (if provided + valid),
-  //   - OR `duration - LOOP_WINDOW_SECONDS` as a fallback.
+  // seconds). Set to `previewTimeMs / 1000` whenever the caller supplies
+  // a mapper-defined PreviewTime; otherwise falls back to
+  // `duration - LOOP_WINDOW_SECONDS` — see `computeLast30Start` below.
   const last30StartRef = useRef(0);
-  // Mapper-defined PreviewTime in seconds. 0 means "unset / fallback".
-  // Set by `playLast30` from the {previewTimeMs} returned by
-  // `lib/beatmapAudio.js`.
-  const previewStartRef = useRef(0);
+  // Mapper-defined PreviewTime in seconds for the currently loaded track,
+  // or null when none was provided (fallback to "last N seconds" behavior).
+  const previewStartSecRef = useRef(null);
 
   useEffect(() => {
     const audio = new Audio();
@@ -68,22 +67,20 @@ export function AudioPlayerProvider({ children }) {
     audio.loop = true;
     audioRef.current = audio;
 
-    // ── Computes where a "last30" loop should restart from. We re-read the
-    // audio.duration each time because metadata may have changed since the
-    // ref was set (e.g. after a src swap to a longer track).
+    // ── Computes where a "last30" loop should restart from. Real osu!
+    // song-select seeks to `[General].PreviewTime` (the mapper-curated
+    // "best" point of the song — usually the drop / chorus / kiai start)
+    // and loops `[PreviewTime, end-of-track]`. We do exactly the same
+    // when a PreviewTime was supplied by the caller (via `playLast30`).
     //
-    // Priority:
-    //   1. Mapper-defined PreviewTime (from .osu `[General].PreviewTime`)
-    //      — only used if it's strictly inside the track, with at least
-    //      ~1 second of music after it (otherwise the loop would be too
-    //      short / unmusical).
-    //   2. Fallback: `duration - LOOP_WINDOW_SECONDS` so we still hear the
-    //      song's climax/outro when no PreviewTime is provided.
+    // If no PreviewTime is available (PreviewTime: -1 in the .osu, or the
+    // .osu wasn't readable), we fall back to "last LOOP_WINDOW_SECONDS of
+    // the track" so the user still hears the climax of the song.
     const computeLast30Start = () => {
       const d = audio.duration;
       if (!d || !isFinite(d)) return 0;
-      const previewSec = previewStartRef.current;
-      if (previewSec > 0 && previewSec < d - 1) {
+      const previewSec = previewStartSecRef.current;
+      if (previewSec != null && previewSec > 0 && previewSec < d) {
         return previewSec;
       }
       return Math.max(0, d - LOOP_WINDOW_SECONDS);
@@ -218,22 +215,22 @@ export function AudioPlayerProvider({ children }) {
     audio.play().catch(() => { setIsPlaying(false); setLoading(false); });
   }, [currentBeatmap]);
 
-  // ── last30 mode: full beatmap audio, looped over [PreviewTime, end] ─────
+  // ── last30 mode: full beatmap audio, looped from PreviewTime → end ─────
   /**
    * Play a *full track* audio (typically a blob URL produced by
-   * `lib/beatmapAudio.js`) and loop it the way real osu! does in
-   * song-select: starting from the mapper-defined PreviewTime (the
-   * "interesting" point of the song — drop / kiai / chorus).
+   * `lib/beatmapAudio.js`) and loop it the same way real osu! song-select
+   * does: seek to `[General].PreviewTime` (kiai/drop/chorus, the mapper-
+   * defined "best" starting point) and loop `[PreviewTime, end-of-track]`.
    *
-   * The loop window is `[startSec, duration]`. If `previewTimeMs` is missing
-   * or invalid (e.g. .osu had `PreviewTime: -1`), we fall back to
-   * `[duration - LOOP_WINDOW_SECONDS, duration]`.
+   * If `previewTimeMs` is omitted, 0, or negative, we fall back to
+   * `[duration - LOOP_WINDOW_SECONDS, end]` so the user still hears the
+   * climax of the song.
    *
    * @param {string} audioUrl  blob URL (or any seekable mp3/ogg) for the
    *                           full beatmap audio file.
    * @param {object} [beatmap] beatmap metadata to expose in `currentBeatmap`.
    * @param {object} [opts]
-   * @param {number} [opts.previewTimeMs] mapper-defined preview point in ms.
+   * @param {number} [opts.previewTimeMs] mapper-defined PreviewTime in ms.
    */
   const playLast30 = useCallback((audioUrl, beatmap, opts = {}) => {
     if (!audioUrl) return;
@@ -242,12 +239,13 @@ export function AudioPlayerProvider({ children }) {
     // Always switch into last30 mode FIRST so onLoadedMetadata can act.
     modeRef.current = "last30";
     last30StartRef.current = 0;
-    // Stash the mapper-defined preview point (in seconds) for the helpers
-    // below. 0 means "unset → use the fallback last-N-seconds window".
-    const ptMs = Number(opts.previewTimeMs) || 0;
-    previewStartRef.current = ptMs > 0 ? ptMs / 1000 : 0;
-    // Native loop is OFF — onEnded handles the wrap so we stay inside the
-    // [PreviewTime, end] window instead of restarting from 0.
+    // Stash the PreviewTime (in seconds) BEFORE load() so the metadata
+    // handler picks it up on first fire. Treat anything ≤ 0 as "absent".
+    const ptMs = Number(opts.previewTimeMs);
+    previewStartSecRef.current =
+      Number.isFinite(ptMs) && ptMs > 0 ? ptMs / 1000 : null;
+    // Native loop is OFF — onEnded handles the wrap so we restart from
+    // PreviewTime instead of from 0.
     audio.loop = false;
 
     const sameBeatmap =
@@ -301,7 +299,7 @@ export function AudioPlayerProvider({ children }) {
     audio.pause();
     try { audio.currentTime = 0; } catch (_) { /* may throw if no source */ }
     modeRef.current = "preview";
-    previewStartRef.current = 0;
+    previewStartSecRef.current = null;
     last30StartRef.current = 0;
     setCurrentBeatmap(null);
     setIsPlaying(false);
