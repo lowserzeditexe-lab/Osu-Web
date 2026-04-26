@@ -194,6 +194,6 @@ DifficultyMultiplier = `floor((CS + HP + OD) / 38) + 2` clampé à [2..6].
   passif) — ne pas le réintroduire.
 - `playback.js` est monolithique (~1500 lignes). Toute modification au render
   loop doit éviter de casser les timings de hit detection.
-- Test rapide : `https://cursor-outline-mod.preview.emergentagent.com/webosu2/`
+- Test rapide : `https://progress-keeper-53.preview.emergentagent.com/webosu2/`
   → choisir une beatmap → lire avec autoplay (`Settings → Autoplay`) pour
   vérifier le score / accuracy / sliders.
