@@ -27,6 +27,34 @@ backend:
           par l'utilisateur). /api/health, /api/beatmaps/popular|new|random
           retournent tous 200.
 
+frontend_critical_fixes:
+  - task: "Boot bloqué sur 'Vérification' (PreloadContext + StrictMode)"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/contexts/PreloadContext.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          Bug : écran "VÉRIFICATION" infini au boot. Cause : React.StrictMode
+          (dev) double-monte le PreloadProvider. La cleanup du 1er mount
+          mettait `cancelled=true` AVANT le 2ème mount, et le `startedRef`
+          empêchait le 2ème mount de relancer. L'async du 1er mount fetchait
+          bien la liste (200 sur /api/beatmaps/popular?limit=50, vérifié via
+          page.on("response")) mais bail-out sur `if (cancelled) return;`
+          juste après setTotal/setDone → la phase restait collée à "fetching"
+          → overlay "VÉRIFICATION" infini.
+          Fix : (a) flag `_preloadStarted` hoisté au scope MODULE (au lieu
+          d'un useRef par instance) ; (b) cleanup ne touche plus à `cancelled`
+          (ce preload est un global one-shot, pas un effet lié au cycle React).
+          Vérifié in-browser : phase passe en ~1s à "TÉLÉCHARGEMENT DES
+          BEATMAPS · 3/48" puis progresse 8 → 16 → 20 → 30 → 31 en 60s.
+          Les 429 NeriNyan visibles en console sont normaux (rate-limits CDN,
+          gérés par le backoff baked dans fetchBeatmapAudio).
+
 frontend:
       - working: true
         agent: "main"

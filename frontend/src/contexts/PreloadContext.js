@@ -39,21 +39,32 @@ const RETRY_CONCURRENCY = 1;
 
 const PreloadContext = createContext(null);
 
+// Module-level guards. React.StrictMode mounts the provider twice in dev,
+// AND runs the cleanup of the first mount BEFORE the second mount fires.
+// If we used a `cancelled` boolean tied to the effect, the first mount's
+// async work would bail out on `if (cancelled) return` after fetching the
+// beatmap list — and the second mount would be skipped by the `startedRef`
+// guard, leaving the overlay stuck on "Vérification" forever. By hoisting
+// the started flag to module scope and NEVER cancelling the in-flight work,
+// the preload runs exactly once per real boot and survives strict-mode
+// remounts cleanly.
+let _preloadStarted = false;
+
 export function PreloadProvider({ children }) {
   const [phase, setPhase] = useState("fetching");
   const [total, setTotal] = useState(0);
   const [done, setDone] = useState(0);
-  const startedRef = useRef(false);
   // Currently-failing set IDs. The background retry loop keeps trying these
   // until the list is empty.
   const pendingRef = useRef([]);
 
   useEffect(() => {
-    // Hard guard against React strict-mode double-invoke. We only ever want
-    // ONE preload run per real boot.
-    if (startedRef.current) return;
-    startedRef.current = true;
+    if (_preloadStarted) return;
+    _preloadStarted = true;
 
+    // We deliberately do NOT cancel on unmount: this is a global one-shot
+    // preload, not a per-component effect. React.StrictMode unmount/remount
+    // must not abort it.
     let cancelled = false;
     let retryTimer = null;
 
@@ -151,8 +162,8 @@ export function PreloadProvider({ children }) {
     })();
 
     return () => {
-      cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
+      // Strict-mode unmount: do nothing. The async work + retry timer are
+      // module-scoped and intentionally outlive component lifecycle.
     };
   }, []);
 
