@@ -63,3 +63,16 @@ export function importFileUrl(id) {
   const base = process.env.REACT_APP_BACKEND_URL || "";
   return `${base}/api/imports/${encodeURIComponent(id)}/file`;
 }
+
+// ── Scores / profile stats (P2.c) ────────────────────────────────
+// Aggregate stats for the current anonymous user (or later,
+// authenticated user). Returns null-safe defaults if the user has
+// never played.
+export async function fetchMyStats() {
+  const { data } = await apiClient.get("/scores/me/stats");
+  return data;
+}
+export async function fetchMyRecent() {
+  const { data } = await apiClient.get("/scores/me/recent");
+  return data.items || [];
+}

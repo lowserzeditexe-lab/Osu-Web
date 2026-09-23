@@ -13,6 +13,13 @@ const { getDb } = require('../services/mongo');
 const router = express.Router();
 
 function getClientId(req) {
+  // 1) Signed-in user — the auth middleware attaches `req.user` with
+  //    the canonical `user_id`. This is now the primary identity for
+  //    every user-scoped route (imports, scores, profile).
+  if (req.user && (req.user.user_id || req.user.id)) {
+    return req.user.user_id || req.user.id;
+  }
+  // 2) Anonymous fallback — `X-Client-Id` UUID from localStorage.
   const cid = req.header('X-Client-Id');
   if (typeof cid !== 'string') return null;
   const trimmed = cid.trim();

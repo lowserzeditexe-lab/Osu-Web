@@ -16,6 +16,7 @@ import LibrarySearchPage from "@/pages/LibrarySearchPage";
 import BeatmapDetailPage from "@/pages/BeatmapDetailPage";
 import SoloPage from "@/pages/SoloPage";
 import PlayPage from "@/pages/PlayPage";
+import AuthCallback from "@/pages/AuthCallback";
 import MiniPlayer from "@/components/MiniPlayer";
 import AppBootOverlay from "@/components/AppBootOverlay";
 import { useLenis } from "@/hooks/useLenis";
@@ -25,6 +26,7 @@ import { LibraryFiltersProvider } from "@/contexts/LibraryFiltersContext";
 import { PreloadProvider, usePreload } from "@/contexts/PreloadContext";
 import { UserProvider } from "@/contexts/UserContext";
 import { ImportsProvider } from "@/contexts/ImportsContext";
+import { AuthProvider } from "@/contexts/AuthContext";
 import osuCursorPng from "@/assets/cursor.png";
 import osuCursorCur from "@/assets/cursor.cur";
 
@@ -47,9 +49,12 @@ function useOsuCursor() {
  */
 function useBootRedirect() {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   useEffect(() => {
     if (pathname === "/") return;
+    // Never redirect during an OAuth callback: the session_id lives in
+    // the URL fragment and would be lost by navigate("/").
+    if (pathname === "/auth/callback" || (hash || "").includes("session_id=")) return;
     let isReload = true;
     try {
       const nav = performance.getEntriesByType("navigation")[0];
@@ -65,14 +70,23 @@ function useBootRedirect() {
 
 function Shell() {
   const { currentBeatmap } = useAudioPlayer();
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   const { phase, total, done, blocking } = usePreload();
+
+  // Detect an in-flight OAuth callback (session_id fragment) synchronously
+  // during render. This must run BEFORE useBootRedirect() so we don't
+  // bounce back to "/" and lose the fragment.
+  const inAuthCallback = pathname === "/auth/callback" || (hash || "").includes("session_id=");
 
   const isSolo = pathname === "/solo";
   const isPlay = pathname.startsWith("/play/");
-  useLenis(!isSolo && !isPlay);
+  useLenis(!isSolo && !isPlay && !inAuthCallback);
   useOsuCursor();
   useBootRedirect();
+
+  if (inAuthCallback) {
+    return <AuthCallback />;
+  }
 
   return (
     <div
@@ -104,19 +118,21 @@ function Shell() {
 export default function App() {
   return (
     <BrowserRouter>
-      <UserProvider>
-        <ImportsProvider>
-          <AudioPlayerProvider>
-            <SavedBeatmapsProvider>
-              <LibraryFiltersProvider>
-                <PreloadProvider>
-                  <Shell />
-                </PreloadProvider>
-              </LibraryFiltersProvider>
-            </SavedBeatmapsProvider>
-          </AudioPlayerProvider>
-        </ImportsProvider>
-      </UserProvider>
+      <AuthProvider>
+        <UserProvider>
+          <ImportsProvider>
+            <AudioPlayerProvider>
+              <SavedBeatmapsProvider>
+                <LibraryFiltersProvider>
+                  <PreloadProvider>
+                    <Shell />
+                  </PreloadProvider>
+                </LibraryFiltersProvider>
+              </SavedBeatmapsProvider>
+            </AudioPlayerProvider>
+          </ImportsProvider>
+        </UserProvider>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

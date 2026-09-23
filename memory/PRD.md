@@ -176,11 +176,10 @@ DifficultyMultiplier = `floor((CS + HP + OD) / 38) + 2` clampé à [2..6].
 
 ## Backlog (P2 restant)
 - ~~Hit sounds (whistle / finish / clap par addition set personnalisé).~~ ✅ (voir Phase A ci-dessous)
-- ColorOverride par map (couleurs de combo personnalisées).
-- Système de scores local côté serveur + stats profil dynamiques (level/pp/rank/acc/playcount)
-  alimentés par les vraies parties jouées (actuellement valeurs mockées dans `ProfileCard`).
-- Bouton "Télécharger" de la Library qui POST vers `/api/imports` au lieu d'un download navigateur.
-- OAuth Google (Emergent-managed) pour remplacer le `clientId` anonyme localStorage.
+- ~~ColorOverride par map (couleurs de combo personnalisées).~~ ✅ (déjà implémenté — Combo1..N + SliderTrackOverride + SliderBorder du `[Colours]` parsés dans `osu.js` et appliqués dans `playback.js`/`SliderMesh.js`)
+- ~~Système de scores local côté serveur + stats profil dynamiques.~~ ✅ (voir P2.c)
+- ~~Bouton "Télécharger" de la Library qui POST vers `/api/imports`.~~ ✅ (déjà implémenté via `POST /api/imports/from-osu` + `importOsuSet()` frontend)
+- ~~OAuth Google (Emergent-managed).~~ ✅ (voir P2.e)
 
 ### 26 Jul 2025 — P2.a Hit sounds custom (skin + per-object filename)
 - **`scripts/playback.js`** : au chargement d'un beatmap, `loadCustomHitsounds()`
@@ -205,6 +204,68 @@ DifficultyMultiplier = `floor((CS + HP + OD) / 38) + 2` clampé à [2..6].
 - **Fallback sûr** : maps sans hitsounds custom → `customSampleMap` vide →
   chaque appel retombe sur le skin builtin identique à l'ancien code. Aucune
   régression pour les beatmaps standards.
+
+### 26 Jul 2025 — P2.c Scores server + profil dynamique
+- **Backend `routes/scores.js`** (déjà présent) : POST /api/scores stocke
+  chaque partie (win/fail) avec `{user_id, bid, mode, total_score, accuracy,
+  max_combo, pp, rank, passed, full_combo, hits, mods, star_rating,
+  completed_at}`. GET /api/scores/me/stats agrège en level/level_progress
+  (formule polynômiale osu!stable), weighted-pp (∑ pp × 0.95^i + bonus
+  playcount), accuracy_avg, playcount, passed_count, global_rank
+  (aggregate + sort par pp pondéré).
+- **Soumission live** (`scripts/overlay/score.js`) : après chaque
+  `showSummary()` (win) et `showDeathMenu()` (fail), fire-and-forget
+  `submitScoreToServer()` via `fetch('/api/scores', {keepalive:true})` en
+  lisant `osuweb:clientId` en localStorage (même origine → cookie session
+  auth automatiquement envoyé quand connecté). `bid` = `metadata.BeatmapID`
+  officiel, ou fallback `{setId}:{version}` pour les imports locaux sans
+  ID osu!.
+- **`ProfileCard`** consomme désormais `fetchMyStats()` (`lib/userApi.js` →
+  GET /api/scores/me/stats) au montage et à chaque changement de route
+  Solo. Le level, pp, global_rank, accuracy_avg, playcount reflètent les
+  vraies parties. Rang global = "—" pour un joueur sans partie.
+
+### 26 Jul 2025 — P2.e Emergent OAuth (Google) — auth managée
+- **Backend Node** (`routes/auth.js`) :
+  - `POST /api/auth/session` — reçoit `{session_id}` (fragment OAuth),
+    appelle `demobackend.emergentagent.com/auth/v1/env/oauth/session-data`
+    avec `X-Session-ID`, upsert `users` par email (préserve un pseudo
+    custom, sinon utilise le `name` Google), insère un doc dans
+    `user_sessions {user_id, session_token, expires_at=+7d}`, pose un
+    cookie httpOnly `session_token` (secure, sameSite=none).
+  - `GET /api/auth/me` — lit token depuis cookie ou `Authorization:
+    Bearer`, valide expiry, renvoie `{user_id,email,username,name,picture,
+    country}`.
+  - `POST /api/auth/logout` — supprime la session + clear cookie.
+  - **Middleware `attachUserIfAuthed`** (monté globalement sur `/api`) :
+    attache `req.user` si session valide. Ne throw jamais → les requêtes
+    anonymes tombent silencieusement en fallback X-Client-Id.
+  - **`getClientId(req)`** de `users.js` refactorisé : renvoie
+    `req.user.user_id` en priorité, sinon `X-Client-Id`. Tous les routes
+    (imports, scores, users) bénéficient automatiquement.
+- **Frontend React** :
+  - `contexts/AuthContext.js` — `user` = `undefined` pendant loading,
+    `null` anonyme, `{user_id,…}` connecté. `signIn()` redirige vers
+    `https://auth.emergentagent.com/?redirect=<origin>/auth/callback`.
+    `signOut()` → POST /api/auth/logout + reset. Skip le check /me si
+    le hash contient `session_id=` pour éviter la race avec AuthCallback.
+  - `pages/AuthCallback.js` — mount sur `/auth/callback#session_id=…`,
+    POST à `/api/auth/session`, clear le hash via `history.replaceState`,
+    puis `navigate('/solo')`. `useRef` (pas `useState`) pour bloquer les
+    double-runs StrictMode.
+  - `App.js` : détection synchronique dans `Shell()` du callback via
+    `useLocation().hash.includes('session_id=')` avant tout autre routing.
+    `useBootRedirect()` skip le retour à "/" quand on est sur le callback
+    (sinon le fragment est perdu au premier reload).
+  - `apiClient.js` : `withCredentials: true` pour que le cookie
+    `session_token` circule sur toutes les requêtes cross-origin.
+  - `ProfileCard.js` : bouton "Sign in" (anonyme) ↔ "Logout" (connecté),
+    avatar Google `picture` remplace le fallback DiceBear, username Google
+    remplace le pseudo Player####.
+- **Coexistence anonyme/auth** : les visiteurs non connectés gardent leur
+  UUID localStorage → `X-Client-Id` → routes fonctionnent identiquement.
+  Une fois connecté, le cookie session prend le pas et scope tous les
+  imports / scores / profil sur l'ID Google.
 
 
 ### 26 Feb 2026 — Solo : Imports utilisateurs + UI "comme avant" + Leaderboard officiel

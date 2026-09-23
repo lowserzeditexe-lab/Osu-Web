@@ -11,6 +11,33 @@
 */
 
 define(['overlay/pp'], function (PP) {
+    // ── Server score submission (P2.c) ─────────────────────────────────
+    // Posts each finished play (win or fail) to /api/scores. Same origin
+    // as the React app so we can hit `/api/scores` directly. The client
+    // identity comes from the shared localStorage key `osuweb:clientId`
+    // (written by /app/frontend/src/lib/clientId.js) — sent as
+    // `X-Client-Id` header, matching the users/imports routes.
+    function readClientId() {
+        try {
+            var v = localStorage.getItem('osuweb:clientId');
+            if (v && v.length >= 8) return v;
+        } catch (_) {}
+        return null;
+    }
+    function submitScoreToServer(payload) {
+        try {
+            var cid = readClientId();
+            if (!cid) return; // no identity yet — skip silently
+            // fire-and-forget; use keepalive so it lands even mid-navigation.
+            fetch('/api/scores', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Client-Id': cid },
+                body: JSON.stringify(payload),
+                keepalive: true,
+            }).catch(function (e) { console.warn('[scores] submit failed', e); });
+        } catch (e) { console.warn('[scores] submit threw', e); }
+    }
+
     function addPlayHistory(summary) {
         if (!window.playHistory1000) {
             window.playHistory1000 = [];
@@ -1120,6 +1147,39 @@ define(['overlay/pp'], function (PP) {
                     if (err) console.error("Error saving play history");
                 });
             }
+            // ── P2.c: server-side score submission ─────────────────
+            // Fire-and-forget: the results overlay must render even if
+            // the network is dead. We reuse the shared clientId written
+            // by the React app so the backend attaches the score to the
+            // right anonymous profile.
+            try {
+                submitScoreToServer({
+                    sid: metadata.BeatmapSetID != null ? String(metadata.BeatmapSetID) : null,
+                    bid: (metadata.BeatmapID && metadata.BeatmapID > 0)
+                        ? String(metadata.BeatmapID)
+                        : ((metadata.BeatmapSetID || 'local') + ':' + (metadata.Version || '')),
+                    mode: 'osu',
+                    total_score: Math.round(this.score) | 0,
+                    accuracy: Math.max(0, Math.min(1, acc)),
+                    max_combo: this.maxcombo | 0,
+                    pp: Math.round(ppEstimate || 0),
+                    rank: rank === 'SS' ? 'X' : rank,
+                    passed: !failed,
+                    full_combo: !!this.fullcombo,
+                    hits: {
+                        great: this.judgecnt.great | 0,
+                        good:  this.judgecnt.good  | 0,
+                        meh:   this.judgecnt.meh   | 0,
+                        miss:  this.judgecnt.miss  | 0,
+                    },
+                    mods: mods ? mods.split('+').filter(Boolean) : [],
+                    title: metadata.Title || null,
+                    artist: metadata.Artist || null,
+                    version: metadata.Version || null,
+                    star_rating: starRating && starRating.total ? starRating.total : null,
+                    is_local: !!(window.playback && window.playback.osu && window.playback.osu.isLocalImport),
+                });
+            } catch (e) { /* never let submission block the UI */ }
         }
 
         // ── Death menu ─────────────────────────────────────────────
@@ -1197,6 +1257,32 @@ define(['overlay/pp'], function (PP) {
                         if (err) console.error('Error saving play history');
                     });
                 }
+                // ── P2.c: server-side score submission (failed play) ──
+                submitScoreToServer({
+                    sid: metadata.BeatmapSetID != null ? String(metadata.BeatmapSetID) : null,
+                    bid: (metadata.BeatmapID && metadata.BeatmapID > 0)
+                        ? String(metadata.BeatmapID)
+                        : ((metadata.BeatmapSetID || 'local') + ':' + (metadata.Version || '')),
+                    mode: 'osu',
+                    total_score: Math.round(this.score) | 0,
+                    accuracy: Math.max(0, Math.min(1, acc)),
+                    max_combo: this.maxcombo | 0,
+                    pp: 0,
+                    rank: 'F',
+                    passed: false,
+                    full_combo: false,
+                    hits: {
+                        great: this.judgecnt.great | 0,
+                        good:  this.judgecnt.good  | 0,
+                        meh:   this.judgecnt.meh   | 0,
+                        miss:  this.judgecnt.miss  | 0,
+                    },
+                    mods: [],
+                    title: metadata.Title || null,
+                    artist: metadata.Artist || null,
+                    version: metadata.Version || null,
+                    is_local: !!(window.playback && window.playback.osu && window.playback.osu.isLocalImport),
+                });
             } catch (_) { /* never let history saving block the menu */ }
         }
 

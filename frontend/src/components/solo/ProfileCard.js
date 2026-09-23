@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   Trophy,
   TrendingUp,
@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import ModsModal from "./ModsModal";
 import { useUser } from "@/contexts/UserContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { fetchMyStats } from "@/lib/userApi";
 
 /**
  * Profile card pinned at the top of the Solo right column.
@@ -38,6 +40,8 @@ export default function ProfileCard({
   const [modsOpen, setModsOpen] = useState(false);
   const navigate = useNavigate();
   const { user, updateUsername } = useUser();
+  const { user: authUser, signIn, signOut } = useAuth();
+  const isAuthed = Boolean(authUser?.user_id);
 
   const canPlay = Boolean(beatmap?.id);
   const isLocalImport = Boolean(beatmap?.is_local_import);
@@ -102,28 +106,40 @@ export default function ProfileCard({
     }
   }
 
-  const username = user?.username || "—";
-  const country = user?.country || "FR";
+  const username = authUser?.username || authUser?.name || user?.username || "—";
+  const country = authUser?.country || user?.country || "FR";
 
-  // Mock stats (to be wired to real scores later). Keeping the visual
-  // structure intact so we don't have to redo the layout when real data
-  // arrives.
+  // ── Real stats fetched from /api/scores/me/stats ─────────────────
+  // Refetches every time the user comes back to Solo (route change) so
+  // that a play just submitted from webosu2 is reflected without a hard
+  // reload. Falls back to zeros while loading or on error.
+  const [stats, setStats] = useState(null);
+  const location = useLocation();
+  useEffect(() => {
+    let cancel = false;
+    fetchMyStats()
+      .then((d) => { if (!cancel) setStats(d); })
+      .catch(() => { if (!cancel) setStats(null); });
+    return () => { cancel = true; };
+  }, [location.pathname, user?.id]);
+
   const player = {
-    level: 87,
-    levelProgress: 0.42,
-    pp: 4821,
-    global_rank: 124503,
-    accuracy: 97.84,
-    playcount: 1823,
+    level: stats?.level ?? 1,
+    levelProgress: stats?.level_progress ?? 0,
+    pp: Math.round(stats?.pp ?? 0),
+    global_rank: stats?.global_rank ?? null,
+    accuracy: (stats?.accuracy_avg ?? 0) * 100,
+    playcount: stats?.playcount ?? 0,
     avatar:
+      authUser?.picture ||
       "https://api.dicebear.com/7.x/bottts-neutral/svg?seed=" +
-      encodeURIComponent(user?.id || "guest") +
+      encodeURIComponent(authUser?.user_id || user?.id || "guest") +
       "&radius=12&backgroundColor=1a1a1f",
   };
 
   const circ = 2 * Math.PI * 30;
 
-  const stats = [
+  const statsCards = [
     {
       icon: <Trophy size={13} strokeWidth={1.7} className="text-white/45" />,
       label: "PERFORMANCE",
@@ -137,7 +153,7 @@ export default function ProfileCard({
     {
       icon: <TrendingUp size={13} strokeWidth={1.7} className="text-white/45" />,
       label: "RANG GLOBAL",
-      value: `#${player.global_rank.toLocaleString("fr-FR")}`,
+      value: player.global_rank ? `#${player.global_rank.toLocaleString("fr-FR")}` : "—",
     },
     {
       icon: <Crosshair size={13} strokeWidth={1.7} className="text-white/45" />,
@@ -270,7 +286,7 @@ export default function ProfileCard({
         {/* Stats grid — revealed on hover */}
         <div className="overflow-hidden max-h-0 opacity-0 translate-y-2 group-hover:max-h-[220px] group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 ease-out">
           <div className="grid grid-cols-2 gap-2 px-4 pb-3">
-            {stats.map((s) => (
+            {statsCards.map((s) => (
               <div
                 key={s.label}
                 className="rounded-xl bg-white/[0.04] border border-white/[0.07] px-3.5 py-2.5"
@@ -353,12 +369,13 @@ export default function ProfileCard({
 
             <button
               type="button"
-              title="Paramètres"
-              data-testid="solo-settings-button"
+              onClick={isAuthed ? signOut : signIn}
+              title={isAuthed ? "Se déconnecter" : "Se connecter avec Google"}
+              data-testid={isAuthed ? "solo-signout-button" : "solo-signin-button"}
               className="h-[46px] px-4 flex-shrink-0 inline-flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.05] text-white/65 hover:text-white hover:bg-white/[0.10] hover:border-white/25 font-semibold uppercase tracking-[0.18em] text-[11px] transition-all active:scale-[0.97]"
             >
               <Settings size={13} strokeWidth={1.8} />
-              Settings
+              {isAuthed ? "Logout" : "Sign in"}
             </button>
           </div>
         </div>
