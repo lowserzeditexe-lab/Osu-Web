@@ -175,12 +175,37 @@ DifficultyMultiplier = `floor((CS + HP + OD) / 38) + 2` clampé à [2..6].
   `playLast30`. Bug `previewStartRef.current` (undefined) corrigé dans `stop()`.
 
 ## Backlog (P2 restant)
-- Hit sounds (whistle / finish / clap par addition set personnalisé).
+- ~~Hit sounds (whistle / finish / clap par addition set personnalisé).~~ ✅ (voir Phase A ci-dessous)
 - ColorOverride par map (couleurs de combo personnalisées).
 - Système de scores local côté serveur + stats profil dynamiques (level/pp/rank/acc/playcount)
   alimentés par les vraies parties jouées (actuellement valeurs mockées dans `ProfileCard`).
 - Bouton "Télécharger" de la Library qui POST vers `/api/imports` au lieu d'un download navigateur.
 - OAuth Google (Emergent-managed) pour remplacer le `clientId` anonyme localStorage.
+
+### 26 Jul 2025 — P2.a Hit sounds custom (skin + per-object filename)
+- **`scripts/playback.js`** : au chargement d'un beatmap, `loadCustomHitsounds()`
+  scanne le `.osz` (via `osu.zip.children`) pour tout fichier au format skin
+  osu! `{normal|soft|drum}-hit{normal|whistle|finish|clap}[N].{wav|ogg|mp3}`,
+  ainsi que `slidertick[N]` et tout `hitSample.filename` référencé par un
+  hitObject (bespoke `boom.wav`, etc.). Chaque blob est décodé via
+  `actx.decodeAudioData` et stocké dans `self.customSampleMap` sous une clé
+  canonique (basename sans extension, lowercased).
+- **Nouveau helper `playCustomOrBuiltin(setId, sound, index, filename, v)`** :
+  résout la sample en priorité `filename` → `${set}-hit${sound}${idx>1?idx:""}`
+  → `${set}-hit${sound}` → fallback builtin `game.sample[setId].hit${sound}`.
+  L'index effectif suit osu!stable : `hit.hitSample.index > 0` gagne, sinon
+  `timing.sampleIndex > 0`, sinon 1. Idem pour `playCustomTick`.
+- **`playHitsound` / `playTicksound`** réécrits pour router chaque composant
+  (normal + whistle/finish/clap ou tick) via ces helpers. Les buffers custom
+  sont joués sur un `AudioBufferSourceNode` frais + `GainNode` connecté à
+  `actx.destination` (permet le chevauchement, pas de recycling d'un
+  `soundNode` unique comme la lib built-in).
+- **Sync `osu.onready`** : `start()` attend `customHitsoundsReady` (poll
+  25 ms, hard cap 5 s) pour que les premières hits bénéficient déjà du map.
+- **Fallback sûr** : maps sans hitsounds custom → `customSampleMap` vide →
+  chaque appel retombe sur le skin builtin identique à l'ancien code. Aucune
+  régression pour les beatmaps standards.
+
 
 ### 26 Feb 2026 — Solo : Imports utilisateurs + UI "comme avant" + Leaderboard officiel
 - **Backend node `routes/imports.js`** : ajout des champs `duration_sec`, `mapper`,

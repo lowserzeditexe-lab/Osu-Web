@@ -70,14 +70,132 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
             self.endTime = self.hits[self.hits.length - 1].endTime + 1500;
             this.wait = Math.max(0, 1500 - this.hits[0].time);
 
+            // ── Custom hitsounds (Phase A) ─────────────────────────────
+            // Scan the .osz for skin-style hitsound overrides
+            // (`normal-hitclap.wav`, `soft-hitfinish2.wav`, …) and any
+            // per-hitObject `hitSample.filename` referenced in the .osu.
+            // Decoded AudioBuffers are stored in `self.customSampleMap`
+            // keyed by canonical name (no extension, lowercased). At
+            // playback we prefer the map over the built-in `game.sample`
+            // set. Falls back gracefully to the built-in skin if the .osz
+            // has no custom sounds — so default maps keep working exactly
+            // as before.
+            self.customSampleMap = {};
+            self.customHitsoundsReady = false;
+            self.playCustomBuffer = function (buffer, volume) {
+                if (!buffer || !window.actx) return false;
+                try {
+                    var src = window.actx.createBufferSource();
+                    src.buffer = buffer;
+                    var gain = window.actx.createGain();
+                    gain.gain.value = Math.max(0, Math.min(1, volume));
+                    src.connect(gain);
+                    gain.connect(window.actx.destination);
+                    src.start(0);
+                    return true;
+                } catch (e) {
+                    return false;
+                }
+            };
+            self.loadCustomHitsounds = function (done) {
+                var zip = self.osu && self.osu.zip;
+                if (!zip || !zip.children || !window.actx) {
+                    self.customHitsoundsReady = true;
+                    return done && done();
+                }
+                // Osu! skin hitsound-file naming (osu!wiki):
+                //   {sampleSet}-hit{normal|whistle|finish|clap}[{index}].{wav|ogg|mp3}
+                //   {sampleSet}-slidertick[{index}].{wav|ogg|mp3}
+                //   {sampleSet}-sliderslide[{index}].{wav|ogg|mp3}
+                //   {sampleSet}-sliderwhistle[{index}].{wav|ogg|mp3}
+                //  sampleSet ∈ {normal, soft, drum}. index omitted == 1 (default).
+                var re = /^(normal|soft|drum)-(hitnormal|hitwhistle|hitfinish|hitclap|slidertick|sliderslide|sliderwhistle)(\d*)\.(wav|ogg|mp3)$/i;
+                // Gather zip entries to decode. We also opportunistically
+                // include any per-object `hitSample.filename` (arbitrary
+                // basename) so beatmaps that ship a bespoke `boom.wav`
+                // etc. get their bespoke sound too.
+                var wanted = new Set();
+                _.each(zip.children, function (c) {
+                    var name = (c.name || '').toLowerCase();
+                    if (re.test(name)) wanted.add(name);
+                });
+                if (self.track && self.track.hitObjects) {
+                    for (var i = 0; i < self.track.hitObjects.length; i++) {
+                        var h = self.track.hitObjects[i];
+                        if (h.hitSample && h.hitSample.filename && typeof h.hitSample.filename === 'string') {
+                            var fn = h.hitSample.filename.trim().toLowerCase();
+                            if (fn && /\.(wav|ogg|mp3)$/.test(fn)) wanted.add(fn);
+                        }
+                    }
+                }
+                if (wanted.size === 0) {
+                    self.customHitsoundsReady = true;
+                    return done && done();
+                }
+                var remaining = wanted.size;
+                var finalize = function () {
+                    remaining--;
+                    if (remaining <= 0) {
+                        self.customHitsoundsReady = true;
+                        console.log('[hitsounds] loaded', Object.keys(self.customSampleMap).length, 'custom samples');
+                        done && done();
+                    }
+                };
+                wanted.forEach(function (filename) {
+                    var entry = null;
+                    // case-insensitive lookup
+                    for (var k = 0; k < zip.children.length; k++) {
+                        if ((zip.children[k].name || '').toLowerCase() === filename) {
+                            entry = zip.children[k]; break;
+                        }
+                    }
+                    if (!entry) { finalize(); return; }
+                    var mime = filename.endsWith('.wav') ? 'audio/wav'
+                             : filename.endsWith('.mp3') ? 'audio/mpeg'
+                             : 'audio/ogg';
+                    entry.getBlob(mime, function (blob) {
+                        var reader = new FileReader();
+                        reader.onload = function (e) {
+                            try {
+                                window.actx.decodeAudioData(e.target.result, function (buf) {
+                                    // key: canonical basename without extension, lowercased
+                                    var key = filename.replace(/\.(wav|ogg|mp3)$/i, '');
+                                    self.customSampleMap[key] = buf;
+                                    // Also store the raw basename (without ext, but with)
+                                    self.customSampleMap[filename] = buf;
+                                    finalize();
+                                }, function () { finalize(); });
+                            } catch (err) { finalize(); }
+                        };
+                        reader.onerror = function () { finalize(); };
+                        reader.readAsArrayBuffer(blob);
+                    });
+                });
+            };
+
             self.osu.onready = function () {
-                self.loadingMenu.hide();
-                self.audioReady = true;
-                if (self.onload)
-                    self.onload();
-                self.start();
+                var kickoff = function () {
+                    self.loadingMenu.hide();
+                    self.audioReady = true;
+                    if (self.onload)
+                        self.onload();
+                    self.start();
+                };
+                // Wait for custom-hitsound decode to finish so the first
+                // hits already benefit from the map (avoids a "cold start"
+                // where the first few notes play the default skin sound).
+                if (self.customHitsoundsReady) kickoff();
+                else {
+                    var deadline = Date.now() + 5000; // hard cap: 5s
+                    var poll = function () {
+                        if (self.customHitsoundsReady || Date.now() > deadline) kickoff();
+                        else setTimeout(poll, 25);
+                    };
+                    poll();
+                }
             }
             self.load = function () {
+                self.loadCustomHitsounds();
                 self.osu.load_mp3(self.track);
             }
 
@@ -861,6 +979,57 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
             // use separate timing for hitsounds, since volume may change inside a slider or spinner
             // note: time is expected time of object hit, not real time
             this.curtimingid = 0;
+
+            // ── Custom hitsound resolution ───────────────────────────────
+            //  * setId ∈ {1,2,3} → set name (normal/soft/drum)
+            //  * effective sample index: hit.hitSample.index (>0 wins) else
+            //    timing.sampleIndex (>0) else 1 (osu!stable default).
+            //  * lookup keys tried in order:
+            //      1. `${setName}-hit${sound}${idx>1?idx:''}`  (custom skin)
+            //      2. `${setName}-hit${sound}`                  (index fallback)
+            //      3. `hit.hitSample.filename` basename         (per-object)
+            //  * If none of those buffers exist → fall back to the built-in
+            //    `game.sample[setId].hit${sound}` from the default skin.
+            var SET_NAMES = { 1: 'normal', 2: 'soft', 3: 'drum' };
+            self.playCustomOrBuiltin = function (setId, sound, index, filename, volume) {
+                var setName = SET_NAMES[setId] || 'normal';
+                var idxSuffix = (index && index > 1) ? String(index) : '';
+                var map = self.customSampleMap || {};
+                var buf = null;
+                if (filename) {
+                    var fn = filename.trim().toLowerCase();
+                    if (fn) {
+                        buf = map[fn.replace(/\.(wav|ogg|mp3)$/i, '')] || map[fn] || null;
+                    }
+                }
+                if (!buf) {
+                    buf = map[setName + '-hit' + sound + idxSuffix]
+                        || map[setName + '-hit' + sound]
+                        || null;
+                }
+                if (buf && self.playCustomBuffer(buf, volume)) return;
+                // Fallback to built-in skin sample.
+                var builtin = self.game.sample[setId] && self.game.sample[setId]['hit' + sound];
+                if (builtin) {
+                    builtin.volume = volume;
+                    builtin.play();
+                }
+            };
+            self.playCustomTick = function (setId, index, volume) {
+                var setName = SET_NAMES[setId] || 'normal';
+                var idxSuffix = (index && index > 1) ? String(index) : '';
+                var map = self.customSampleMap || {};
+                var buf = map[setName + '-slidertick' + idxSuffix]
+                       || map[setName + '-slidertick']
+                       || null;
+                if (buf && self.playCustomBuffer(buf, volume)) return;
+                var builtin = self.game.sample[setId] && self.game.sample[setId].slidertick;
+                if (builtin) {
+                    builtin.volume = volume;
+                    builtin.play();
+                }
+            };
+
             this.playTicksound = function playTicksound(hit, time) {
                 while (this.curtimingid + 1 < this.track.timingPoints.length && this.track.timingPoints[this.curtimingid + 1].offset <= time)
                     this.curtimingid++;
@@ -869,8 +1038,9 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
                 let timing = this.track.timingPoints[this.curtimingid];
                 let volume = self.game.masterVolume * self.game.effectVolume * (hit.hitSample.volume || timing.volume) / 100;
                 let defaultSet = timing.sampleSet || self.game.sampleSet;
-                self.game.sample[defaultSet].slidertick.volume = volume;
-                self.game.sample[defaultSet].slidertick.play();
+                let effIndex = (hit.hitSample.index > 0) ? hit.hitSample.index
+                             : (timing.sampleIndex > 0 ? timing.sampleIndex : 1);
+                self.playCustomTick(defaultSet, effIndex, volume);
             };
             this.playHitsound = function playHitsound(hit, id, time) {
                 while (this.curtimingid + 1 < this.track.timingPoints.length && this.track.timingPoints[this.curtimingid + 1].offset <= time)
@@ -880,22 +1050,19 @@ define(["osu", "playerActions", "SliderMesh", "overlay/score", "overlay/volume",
                 let timing = this.track.timingPoints[this.curtimingid];
                 let volume = self.game.masterVolume * self.game.effectVolume * (hit.hitSample.volume || timing.volume) / 100;
                 let defaultSet = timing.sampleSet || self.game.sampleSet;
+                let effIndex = (hit.hitSample.index > 0) ? hit.hitSample.index
+                             : (timing.sampleIndex > 0 ? timing.sampleIndex : 1);
+                let filename = hit.hitSample && hit.hitSample.filename ? hit.hitSample.filename : '';
+                // `volume` is already 0..1 (masterVolume·effectVolume·timingVolume/100).
+                let v = volume;
                 function playHit(bitmask, normalSet, additionSet) {
-                    // The normal sound is always played
-                    self.game.sample[normalSet].hitnormal.volume = volume;
-                    self.game.sample[normalSet].hitnormal.play();
-                    if (bitmask & 2) {
-                        self.game.sample[additionSet].hitwhistle.volume = volume;
-                        self.game.sample[additionSet].hitwhistle.play();
-                    }
-                    if (bitmask & 4) {
-                        self.game.sample[additionSet].hitfinish.volume = volume;
-                        self.game.sample[additionSet].hitfinish.play();
-                    }
-                    if (bitmask & 8) {
-                        self.game.sample[additionSet].hitclap.volume = volume;
-                        self.game.sample[additionSet].hitclap.play();
-                    }
+                    // The normal sound is always played.
+                    // Per osu!stable: `hitSample.filename` (if set) replaces
+                    // only the "hitnormal" component of a *circle* hit.
+                    self.playCustomOrBuiltin(normalSet, 'normal', effIndex, filename, v);
+                    if (bitmask & 2) self.playCustomOrBuiltin(additionSet, 'whistle', effIndex, '', v);
+                    if (bitmask & 4) self.playCustomOrBuiltin(additionSet, 'finish',  effIndex, '', v);
+                    if (bitmask & 8) self.playCustomOrBuiltin(additionSet, 'clap',    effIndex, '', v);
                 }
                 if (hit.type == 'circle' || hit.type == 'spinner') {
                     let toplay = hit.hitSound;
