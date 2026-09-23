@@ -230,6 +230,6 @@ Agent, -sakuu-, etc.) avec ranks SS+ pour la map ID `760464` / set `320118`.
   passif) — ne pas le réintroduire.
 - `playback.js` est monolithique (~1500 lignes). Toute modification au render
   loop doit éviter de casser les timings de hit detection.
-- Test rapide : `https://progress-keeper-53.preview.emergentagent.com/webosu2/`
+- Test rapide : `https://production-sync-39.preview.emergentagent.com/webosu2/`
   → choisir une beatmap → lire avec autoplay (`Settings → Autoplay`) pour
   vérifier le score / accuracy / sliders.
