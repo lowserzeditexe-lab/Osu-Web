@@ -16,6 +16,7 @@ import LibrarySearchPage from "@/pages/LibrarySearchPage";
 import BeatmapDetailPage from "@/pages/BeatmapDetailPage";
 import SoloPage from "@/pages/SoloPage";
 import PlayPage from "@/pages/PlayPage";
+import SettingsPage from "@/pages/SettingsPage";
 import AuthCallback from "@/pages/AuthCallback";
 import MiniPlayer from "@/components/MiniPlayer";
 import AppBootOverlay from "@/components/AppBootOverlay";
@@ -98,6 +99,7 @@ function Shell() {
         <Route path="/" element={<MenuPage />} />
         <Route path="/solo" element={<SoloPage />} />
         <Route path="/play/:sid" element={<PlayPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="/library" element={<LibraryPage />} />
         <Route path="/library/search" element={<LibrarySearchPage />} />
         <Route path="/library/c/:category" element={<LibraryCategoryPage />} />
